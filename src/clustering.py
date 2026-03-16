@@ -428,7 +428,7 @@ def find_warning_periods(result_data, data_all_train, outbreak_season, warning_l
     
     return ED_date
 
-K-means clustering을 수행하는 함수
+# K-means clustering을 수행하는 함수
 def K_means_clustering(df):
     X_train = df[['slope', 'mean', 'CS_mean']].copy()
     scaler = StandardScaler()
