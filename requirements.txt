@@ -6,6 +6,6 @@ scipy
 plotly
 matplotlib
 seaborn
-scikit-learn
-yellowbrick
+scikit-learn==1.5.1
+yellowbrick==1.5
 setuptools
