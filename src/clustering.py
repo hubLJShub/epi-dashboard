@@ -428,64 +428,24 @@ def find_warning_periods(result_data, data_all_train, outbreak_season, warning_l
     
     return ED_date
 
-# K-means clustering을 수행하는 함수
-# def K_means_clustering(df):
-#     X_train = df[['slope', 'mean', 'CS_mean']].copy()
-#     scaler = StandardScaler()
-#     X_scaled = scaler.fit_transform(X_train)
-
-#     # model = KMeans(random_state=727, n_init=10)
-    
-#     visualizer = KElbowVisualizer(KMeans(random_state=727, n_init=10), k=(2, 10), metric='silhouette', timings=True)
-#     visualizer.fit(X_scaled)
-#     visualizer.finalize()
-#     k = visualizer.elbow_value_
-#     plt.close()
-    
-#     kmeans = KMeans(n_clusters=k, random_state=727, n_init=10)
-#     labels = kmeans.fit_predict(X_scaled)
-#     df['label'] = labels
-    
-#     RI_means = df.groupby('label')['slope'].mean()
-#     label_order = RI_means.sort_values().index
-#     custom_order = {old_label: new_label for new_label, old_label in enumerate(label_order)}
-#     df['label'] = df['label'].map(custom_order)
-    
-#     result_data = df.sort_values('data_num')
-#     result_data.reset_index(drop=True, inplace=True)
-#     result_data['label'] = result_data['label'].astype(str)
-
-#     return result_data, kmeans, k, scaler
-
-
+K-means clustering을 수행하는 함수
 def K_means_clustering(df):
     X_train = df[['slope', 'mean', 'CS_mean']].copy()
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_train)
 
-    # --- 자동으로 최적의 k 찾기 (Yellowbrick 미사용 버전) ---
-    best_k = 3 # 기본값
-    max_score = -1
+    # model = KMeans(random_state=727, n_init=10)
     
-    # 2개부터 10개까지 돌려보며 실루엣 점수가 가장 높은 k를 찾습니다.
-    for n in range(2, 11):
-        test_kmeans = KMeans(n_clusters=n, random_state=727, n_init=10)
-        labels = test_kmeans.fit_predict(X_scaled)
-        score = silhouette_score(X_scaled, labels)
-        
-        if score > max_score:
-            max_score = score
-            best_k = n
+    visualizer = KElbowVisualizer(KMeans(random_state=727, n_init=10), k=(2, 10), metric='silhouette', timings=True)
+    visualizer.fit(X_scaled)
+    visualizer.finalize()
+    k = visualizer.elbow_value_
+    plt.close()
     
-    k = best_k
-    # -----------------------------------------------------
-
-    # 결정된 k로 진짜 클러스터링 수행
     kmeans = KMeans(n_clusters=k, random_state=727, n_init=10)
     labels = kmeans.fit_predict(X_scaled)
     df['label'] = labels
     
-    # ... (이하 라벨 정렬 및 정리는 기존과 동일) ...
     RI_means = df.groupby('label')['slope'].mean()
     label_order = RI_means.sort_values().index
     custom_order = {old_label: new_label for new_label, old_label in enumerate(label_order)}
@@ -494,6 +454,46 @@ def K_means_clustering(df):
     result_data = df.sort_values('data_num')
     result_data.reset_index(drop=True, inplace=True)
     result_data['label'] = result_data['label'].astype(str)
+
+    return result_data, kmeans, k, scaler
+
+
+# def K_means_clustering(df):
+#     X_train = df[['slope', 'mean', 'CS_mean']].copy()
+#     scaler = StandardScaler()
+#     X_scaled = scaler.fit_transform(X_train)
+
+#     # --- 자동으로 최적의 k 찾기 (Yellowbrick 미사용 버전) ---
+#     best_k = 3 # 기본값
+#     max_score = -1
+    
+#     # 2개부터 10개까지 돌려보며 실루엣 점수가 가장 높은 k를 찾습니다.
+#     for n in range(2, 11):
+#         test_kmeans = KMeans(n_clusters=n, random_state=727, n_init=10)
+#         labels = test_kmeans.fit_predict(X_scaled)
+#         score = silhouette_score(X_scaled, labels)
+        
+#         if score > max_score:
+#             max_score = score
+#             best_k = n
+    
+#     k = best_k
+#     # -----------------------------------------------------
+
+#     # 결정된 k로 진짜 클러스터링 수행
+#     kmeans = KMeans(n_clusters=k, random_state=727, n_init=10)
+#     labels = kmeans.fit_predict(X_scaled)
+#     df['label'] = labels
+    
+#     # ... (이하 라벨 정렬 및 정리는 기존과 동일) ...
+#     RI_means = df.groupby('label')['slope'].mean()
+#     label_order = RI_means.sort_values().index
+#     custom_order = {old_label: new_label for new_label, old_label in enumerate(label_order)}
+#     df['label'] = df['label'].map(custom_order)
+    
+#     result_data = df.sort_values('data_num')
+#     result_data.reset_index(drop=True, inplace=True)
+#     result_data['label'] = result_data['label'].astype(str)
 
     return result_data, kmeans, k, scaler
 
