@@ -432,9 +432,9 @@ def K_means_clustering(df):
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_train)
 
-    model = KMeans(random_state=727, n_init=10)
+    # model = KMeans(random_state=727, n_init=10)
     
-    visualizer = KElbowVisualizer(model, k=(2, 10), metric='silhouette', timings=True)
+    visualizer = KElbowVisualizer(KMeans(random_state=727, n_init=10), k=(2, 10), metric='silhouette', timings=True)
     visualizer.fit(X_scaled)
     visualizer.finalize()
     k = visualizer.elbow_value_
