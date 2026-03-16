@@ -7,4 +7,4 @@ matplotlib
 seaborn
 scikit-learn
 yellowbrick
-distutils
+setuptools
