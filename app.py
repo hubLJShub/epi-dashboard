@@ -95,7 +95,6 @@ with st.sidebar:
         
         # default_idx = all_cols.index(Config.EPI_COL) if hasattr(Config, 'EPI_COL') and Config.EPI_COL in all_cols else (1 if len(all_cols) > 1 else 0)
         # 🌟 대표적인 질병 키워드 사전 (소문자로 작성해두면 대소문자 가리지 않고 다 잡습니다!)
-        # 🌟 대표적인 질병 키워드 사전 (대소문자 무관하게 탐지)
         disease_keywords = ['ili', 'noro', 'hfmd', 'hrsv', 'covid', 'flu', 'patient', 'cases']
         
         target_default_idx = 0
@@ -168,7 +167,7 @@ with st.sidebar:
     manual_start_week = st.number_input(
         "Set Season Start Week (1~52)", 
         min_value=1, max_value=52, step=1,
-        help="독감(ILI)이나 수족구병은 1, 노로바이러스는 20~37 사이를 추천합니다.",
+        help="Recommended: 1 for ILI/HFMD, 20~37 for Norovirus.",
         key="start_week_input"
     )
     
