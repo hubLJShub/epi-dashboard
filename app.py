@@ -255,7 +255,7 @@ with tab2:
             # ---------------------------------------------------------------------
             # [Step 0.5] Season Dynamics & Train/Test Split
             # ---------------------------------------------------------------------
-            status.write("0.5. Running Season Detection...")            
+            status.write("1. Running Season Detection...")            
             # 1. 유행 기준 찾기
             season_df = set_season_start_week(proc_data, target_col)
             seasons = season_df['season'].to_list()
