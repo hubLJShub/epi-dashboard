@@ -20,7 +20,7 @@ try:
     )
     # 새로 업데이트된 시각화 함수들로 임포트 변경
     from src.visualization import (
-        K_means_visualization, 
+        # K_means_visualization, 
         early_warning_visualization, 
         early_warning_visualization_bootstrap, 
         visualization_real_time_early_detection,
