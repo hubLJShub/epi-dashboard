@@ -94,7 +94,7 @@ with st.sidebar:
         all_cols = raw_data.columns.tolist()
         
         # default_idx = all_cols.index(Config.EPI_COL) if hasattr(Config, 'EPI_COL') and Config.EPI_COL in all_cols else (1 if len(all_cols) > 1 else 0)
-        # 🌟 대표적인 질병 키워드 사전 (소문자로 작성해두면 대소문자 가리지 않고 다 잡습니다!)
+        # 🌟 대표적인 질병 키워드 사전 (대소문자 무관하게 탐지)
         disease_keywords = ['ili', 'noro', 'hfmd', 'hrsv', 'covid', 'flu', 'patient', 'cases']
         
         target_default_idx = 0
@@ -144,40 +144,41 @@ with st.sidebar:
         st.warning("No data loaded.")
         st.stop()
 
-    st.markdown("---")
-    st.header("2. Period Settings")
+    # st.markdown("---")
+    # st.header("2. Period Settings")
 
-    # 🌟 1. 위에서 고른 타겟 컬럼 이름(target_col)을 소문자로 변환해서 확인합니다.
-    target_lower = str(target_col).lower()
+    # # 🌟 1. 위에서 고른 타겟 컬럼 이름(target_col)을 소문자로 변환해서 확인합니다.
+    # target_lower = str(target_col).lower()
     
-    # 🌟 2. 질병 이름에 따라 디폴트 시작 주차를 똑똑하게 지정해 줍니다!
-    if 'noro' in target_lower:
-        default_start = 20
-    elif 'ili' in target_lower or 'hfmd' in target_lower:
-        default_start = 1
-    else:
-        default_start = 1  # 혹시 모를 다른 질병을 위한 기본값
+    # # 🌟 2. 질병 이름에 따라 디폴트 시작 주차를 똑똑하게 지정해 줍니다!
+    # if 'noro' in target_lower:
+    #     default_start = 20
+    # elif 'ili' in target_lower or 'hfmd' in target_lower:
+    #     default_start = 1
+    # else:
+    #     default_start = 1  # 혹시 모를 다른 질병을 위한 기본값
         
-    # 만약 session_state에 이전 값이 남아있어서 안 바뀌는 현상을 막기 위해 강제로 업데이트!
-    if 'prev_target' not in st.session_state or st.session_state.prev_target != target_col:
-        st.session_state['start_week_input'] = default_start
-        st.session_state.prev_target = target_col
+    # # 만약 session_state에 이전 값이 남아있어서 안 바뀌는 현상을 막기 위해 강제로 업데이트!
+    # if 'prev_target' not in st.session_state or st.session_state.prev_target != target_col:
+    #     st.session_state['start_week_input'] = default_start
+    #     st.session_state.prev_target = target_col
 
-    # 🌟 3. 계산된 default_start를 입력창에 넣어줍니다.
-    manual_start_week = st.number_input(
-        "Set Season Start Week (1~52)", 
-        min_value=1, max_value=52, step=1,
-        help="Recommended: 1 for ILI/HFMD, 20~37 for Norovirus.",
-        key="start_week_input"
-    )
+    # # 🌟 3. 계산된 default_start를 입력창에 넣어줍니다.
+    # manual_start_week = st.number_input(
+    # "Set Season Start Week (1~52)", 
+    # min_value=1, max_value=52, step=1,
+    # help="Recommended: 1 for ILI/HFMD, 20~37 for Norovirus.",
+    # key="start_week_input"
+    # )
     
+    # train_date = None
+    # test_date = None
+    manual_start_week = 1   
     train_date = None
     test_date = None
 
-
     st.markdown("---")
-    st.header("3. Parameters")
-    
+    st.header("2. Parameters")
     
     # 꼭 필요한 파라미터만 남겨둡니다.
     boot_num = st.number_input("Bootstrap Iterations", 50, 2000, 1000, step=50, key="boot_num_input")
@@ -202,43 +203,162 @@ st.markdown("""
 
 tab1, tab2, tab3 = st.tabs(["Manual & Settings Guide", "Dashboard Analysis", "논문요약페이지"])
 
-with tab1:
-    st.markdown("###  Detailed Instructions & Defaults")
+# with tab1:
+#     st.markdown("###  Detailed Instructions & Defaults")
     
+#     st.markdown("""
+#     <div style="background-color: #ffffff; padding: 25px; border: 1px solid #ddd; border-radius: 10px; font-size: 18px; line-height: 1.8;">
+#         <div style="background-color: #e8f4f8; padding: 15px; border-radius: 8px; margin-bottom: 25px; border-left: 5px solid #2e86c1;">
+#             <strong> Default Data Notice:</strong><br>
+#             If no Excel file is uploaded, the system automatically loads the internal 
+#             <strong>South Korea Influenza Surveillance Data (KDCA)</strong>.
+#         </div>
+#         <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px; margin-top: 0;">1. Data Input</h3>
+#         <ul style="margin-bottom: 30px;">
+#             <li><strong>Target Column:</strong> The column representing patient counts.<br>
+#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
+#              Default: <b>ILI</b> (Influenza-like Illness)</span></li>
+#             <li><strong>Date Column:</strong> The column containing date information (YYYY-MM-DD).<br>
+#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
+#              Default: Automatically detected</span></li>
+#         </ul>
+#         <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px;">2. Period Settings</h3>
+#         <ul style="margin-bottom: 30px;">
+#             <li><strong>Dynamic Detection Mode (Default):</strong> The system operates in fully automatic mode by default. The algorithm dynamically detects the optimal season start week and automatically splits the historical data (Train) and the ongoing real-time data (Test).<br>
+#             <span style="color: #2e86c1; font-size: 16px; background-color: #e8f4f8; padding: 2px 8px; border-radius: 4px;">
+#              <b>Highly Recommended</b> for standard real-time monitoring.</span></li>
+#             <li><strong>Manual Parameter Settings:</strong> By checking this option, expert users can override the automated system and manually define the <b>Train End Date</b>, <b>Test End Date</b>, and a specific <b>Season Start Date</b>.</li>
+#         </ul>
+#         <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px;">3. Algorithm Parameters</h3>
+#         <ul>
+#             <li><strong>Bootstrap Iterations (B):</strong> The number of resampling iterations for the ensemble clustering model.<br>
+#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
+#              Default: <b>1000 Iterations</b> (Higher = More stable but longer computation)</span></li>
+#             <li><strong>Hockey Stick Type:</strong> The regression method used to detect sudden exponential trend changes at the epidemic onset.<br>
+#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
+#              Default: <b>Linear</b></span></li>
+#         </ul>
+#     </div>
+#     """, unsafe_allow_html=True)
+with tab1:
+    # 🌟 대제목 (가장 크게)
+    st.markdown("<h2 style='font-size: 32px; font-weight: 800; color: #2c3e50; margin-bottom: 20px;'>Dashboard Guide & Setup</h2>", unsafe_allow_html=True)
     st.markdown("""
-    <div style="background-color: #ffffff; padding: 25px; border: 1px solid #ddd; border-radius: 10px; font-size: 18px; line-height: 1.8;">
-        <div style="background-color: #e8f4f8; padding: 15px; border-radius: 8px; margin-bottom: 25px; border-left: 5px solid #2e86c1;">
-            <strong> Default Data Notice:</strong><br>
-            If no Excel file is uploaded, the system automatically loads the internal 
-            <strong>South Korea Influenza Surveillance Data (KDCA)</strong>.
-        </div>
-        <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px; margin-top: 0;">1. Data Input</h3>
-        <ul style="margin-bottom: 30px;">
-            <li><strong>Target Column:</strong> The column representing patient counts.<br>
-            <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-             Default: <b>ILI</b> (Influenza-like Illness)</span></li>
-            <li><strong>Date Column:</strong> The column containing date information (YYYY-MM-DD).<br>
-            <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-             Default: Automatically detected</span></li>
-        </ul>
-        <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px;">2. Period Settings</h3>
-        <ul style="margin-bottom: 30px;">
-            <li><strong>Dynamic Detection Mode (Default):</strong> The system operates in fully automatic mode by default. The algorithm dynamically detects the optimal season start week and automatically splits the historical data (Train) and the ongoing real-time data (Test).<br>
-            <span style="color: #2e86c1; font-size: 16px; background-color: #e8f4f8; padding: 2px 8px; border-radius: 4px;">
-             <b>Highly Recommended</b> for standard real-time monitoring.</span></li>
-            <li><strong>Manual Parameter Settings:</strong> By checking this option, expert users can override the automated system and manually define the <b>Train End Date</b>, <b>Test End Date</b>, and a specific <b>Season Start Date</b>.</li>
-        </ul>
-        <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px;">3. Algorithm Parameters</h3>
-        <ul>
-            <li><strong>Bootstrap Iterations (B):</strong> The number of resampling iterations for the ensemble clustering model.<br>
-            <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-             Default: <b>1000 Iterations</b> (Higher = More stable but longer computation)</span></li>
-            <li><strong>Hockey Stick Type:</strong> The regression method used to detect sudden exponential trend changes at the epidemic onset.<br>
-            <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-             Default: <b>Linear</b></span></li>
-        </ul>
-    </div>
+    <style>
+    div[data-testid="stExpander"] details summary p,
+    div[data-testid="stExpander"] details summary span,
+    [data-testid="stExpander"] summary p,
+    [data-testid="stExpander"] summary span {
+        font-size: 24px !important; 
+        font-weight: 800 !important;
+        color: #2c3e50 !important; /* 대제목과 어울리는 진한 남색 */
+    }
+    /* 옆에 있는 꺾쇠(화살표) 아이콘도 글자 크기에 맞춰 살짝 키워줍니다 */
+    [data-testid="stExpander"] summary svg {
+        width: 24px !important;
+        height: 24px !important;
+        color: #2c3e50 !important;
+    }
+    </style>
     """, unsafe_allow_html=True)
+with tab1:
+    # 🌟 [CSS 최적화] 모든 Expander 제목 글자 크기를 24px로 크고 진하게 고정합니다!
+    st.markdown("""
+    <style>
+    div[data-testid="stExpander"] details summary p,
+    div[data-testid="stExpander"] details summary span,
+    [data-testid="stExpander"] summary p,
+    [data-testid="stExpander"] summary span {
+        font-size: 24px !important; 
+        font-weight: 800 !important;
+        color: #2c3e50 !important;
+    }
+    [data-testid="stExpander"] summary svg {
+        width: 24px !important;
+        height: 24px !important;
+        color: #2c3e50 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    # =========================================================================
+    # 🌟 [최종 수정] 0. Introduction (그림 위치 상단으로 이동 + 고화질)
+    # =========================================================================
+    with st.expander("0. Introduction", expanded=True):
+        # 사용자 지정 비율을 유지합니다. [0.5, 2.5]
+        col1, col2 = st.columns([0.5, 2.5], gap="large")
+        
+        with col1:
+            import os
+            import base64
+            
+            # 경로 설정
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            img_path = os.path.join(current_dir, "images", "intro_example.png")
+            
+            try:
+                # 🌟 파일을 base64로 인코딩해서 HTML 안에 직접 쏘아주는 방식
+                with open(img_path, "rb") as image_file:
+                    encoded_string = base64.b64encode(image_file.read()).decode()
+                
+                # 🌟 [핵심 해결책] 복잡한 flex, height 100% 다 지웠습니다!
+                # text-align: center로 가운데 정렬만 남기고,
+                # margin-top: -5px; 를 주어서 위로 바짝 끌어올렸습니다. (숫자를 -10px, -20px 등으로 조절하면 더 위로 뚫고 올라갑니다!)
+                # 🌟 [핵심 해결책] margin-bottom: 30px; 를 추가하여 사진 아래에 넉넉한 빈 공간을 만듭니다!
+                st.markdown(f'<div style="text-align: center; margin-top: 5px; margin-bottom: 40px;"><img src="data:image/png;base64,{encoded_string}" width="200" style="border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"></div>', unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Image load error: {e}")
+
+        with col2:
+            # 🌟 [오른쪽: 설명 부분, 중앙 고정을 풀고 사진과 똑같은 여백을 주어 함께 움직이게 묶음!]
+            st.markdown("""
+            <div style="border-left: 5px solid #1f77b4; background-color: #f8fbff; padding: 20px 25px; border-radius: 0 8px 8px 0; margin-top: 5px; margin-bottom: 40px;">
+                <div style="color: #333; line-height: 1.8;">
+                    <p style="font-size: 22px; font-weight: 500; margin-bottom: 15px;">This dashboard is a tool that defines when an outbreak started using seasonal infectious disease data, and uses this to determine when the next outbreak will occur during an ongoing season.</p>
+                    <p style="font-size: 22px; font-weight: 500; margin-bottom: 15px;">A 'season' is defined from the start to the end of a single outbreak wave, and the dashboard is equipped with an algorithm to detect this automatically.</p>
+                    <p style="font-size: 22px; font-weight: 500; margin-bottom: 0;">Therefore, the real-time detection period can only be verified for the final, ongoing season.</p>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+# 🌟 1. Setting Guide (텍스트 대신 이미지 한 장으로 깔끔하게 대체)
+    with st.expander("1. Setting Guide", expanded=False):
+        import os
+        import base64
+        
+        # 경로 설정 (Setting_guide.jpg 파일이 images 폴더 안에 있어야 합니다!)
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        setting_img_path = os.path.join(current_dir, "images", "Setting_guide.png")
+        
+        try:
+            # 파일을 base64로 인코딩해서 HTML 안에 직접 쏘아주는 방식
+            with open(setting_img_path, "rb") as image_file:
+                # 🌟 확장자가 png이므로 data:image/png 로 맞춰줍니다!
+                encoded_setting_img = base64.b64encode(image_file.read()).decode()
+            # 🌟 [핵심] 기존 텍스트를 모두 지우고 이미지를 중앙에 띄웁니다.
+            # max-width: 100% 를 주어 모니터 창 크기에 맞춰 이미지가 예쁘게 자동 축소/확대되도록 했습니다.
+            st.markdown(f"""
+                <div style="display: flex; justify-content: center; padding: 20px 0;">
+                    <img src="data:image/jpeg;base64,{encoded_setting_img}" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                </div>
+            """, unsafe_allow_html=True)
+            
+        except Exception as e:
+            # 이미지를 찾을 수 없을 때 안내 메시지
+            st.error(f"Image load error: {e}")
+            st.info("💡 'images' 폴더 안에 'Setting_guide.jpg' 파일이 있는지, 파일명 대소문자가 정확한지 확인해주세요!")
+
+    # 🌟 2. Dashboard Analysis (Placeholder)
+    with st.expander("2. Dashboard Analysis", expanded=False):
+        st.markdown("""
+        <div style="border: 2px dashed #ccc; border-radius: 8px; padding: 80px 20px; text-align: center; margin-bottom: 25px; margin-top: 15px; background-color: #fafafa;">
+            <span style="font-size: 26px; color: #555; font-weight: bold;">Plot 1</span><br>
+            <span style="font-size: 16px; color: #999;">(Insert your first plot code here later)</span>
+        </div>
+        
+        <div style="border: 2px dashed #ccc; border-radius: 8px; padding: 80px 20px; text-align: center; margin-bottom: 15px; background-color: #fafafa;">
+            <span style="font-size: 26px; color: #555; font-weight: bold;">Plot 2</span><br>
+            <span style="font-size: 16px; color: #999;">(Insert your second plot code here later)</span>
+        </div>
+        """, unsafe_allow_html=True)
 
 with tab2:
     if run_btn:
@@ -368,7 +488,7 @@ with tab2:
             st.subheader("1. Bootstrap Early Warning Detection")
             
             # 새로운 시각화 함수 적용
-            fig1, fig2 = early_warning_visualization_bootstrap(
+            fig1 = early_warning_visualization_bootstrap(
                 proc_data, data_all_train, target_col, other_dates, hockey_date, date_df, best_window
             )
             
@@ -429,65 +549,48 @@ with tab2:
                         )
                         
                         st.plotly_chart(fig_interactive, use_container_width=True)
-                        
-                        # 3. 🌟 올려주신 사진과 똑같이 생긴 3단 경보 요약 박스 UI 🌟
-
-                        # st.markdown(f"""
-                        # <div style="border-radius: 8px; border: 1px solid #e0e0e0; overflow: hidden; margin-top: 10px; margin-bottom: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-                        #     <div style="background-color: #5ab2c8; color: white; padding: 10px; text-align: center; font-size: 18px; font-weight: bold;">
-                        #         최초 조기 탐지 경보 시기 요약
-                        #     </div>
-                        #     <div style="display: flex; text-align: center; background-color: white;">
-                        #         <div style="flex: 1; padding: 20px 0; border-right: 1px solid #e0e0e0; border-top: 3px solid #1f77b4;">
-                        #             <div style="font-size: 14px; color: #666; margin-bottom: 8px;">관심 경보 (Blue)</div>
-                        #             <div style="font-size: 22px; font-weight: bold; color: #1f77b4;">{d_blue}</div>
-                        #         </div>
-                        #         <div style="flex: 1; padding: 20px 0; border-right: 1px solid #e0e0e0; border-top: 3px solid #ff7f0e;">
-                        #             <div style="font-size: 14px; color: #666; margin-bottom: 8px;">주의 경보 (Orange)</div>
-                        #             <div style="font-size: 22px; font-weight: bold; color: #ff7f0e;">{d_orange}</div>
-                        #         </div>
-                        #         <div style="flex: 1; padding: 20px 0; border-top: 3px solid #d62728;">
-                        #             <div style="font-size: 14px; color: #666; margin-bottom: 8px;">경계 경보 (Red)</div>
-                        #             <div style="font-size: 22px; font-weight: bold; color: #d62728;">{d_red}</div>
-                        #         </div>
-                        #     </div>
-                        # </div>
-                        # """, unsafe_allow_html=True)
-
-                        # st.markdown(f"""
-                        # <div style="display: flex; gap: 15px; margin-top: 10px; margin-bottom: 30px;">
-                        #     <div style="flex: 1; background: white; padding: 25px 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border-left: 8px solid #4A90E2;">
-                        #         <div style="font-size: 14px; color: #888; font-weight: 600; margin-bottom: 5px;">🔵 단계 1 : 관심 (Blue)</div>
-                        #         <div style="font-size: 28px; color: #2C3E50; font-weight: 800; letter-spacing: 0.5px;">{d_blue}</div>
-                        #     </div>
-                        #     <div style="flex: 1; background: white; padding: 25px 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border-left: 8px solid #F5A623;">
-                        #         <div style="font-size: 14px; color: #888; font-weight: 600; margin-bottom: 5px;">🟠 단계 2 : 주의 (Orange)</div>
-                        #         <div style="font-size: 28px; color: #2C3E50; font-weight: 800; letter-spacing: 0.5px;">{d_orange}</div>
-                        #     </div>
-                        #     <div style="flex: 1; background: white; padding: 25px 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border-left: 8px solid #D0021B;">
-                        #         <div style="font-size: 14px; color: #888; font-weight: 600; margin-bottom: 5px;">🔴 단계 3 : 경계 (Red)</div>
-                        #         <div style="font-size: 28px; color: #2C3E50; font-weight: 800; letter-spacing: 0.5px;">{d_red}</div>
-                        #     </div>
-                        # </div>
-                        # """, unsafe_allow_html=True)
-
                         st.markdown(f"""
-                        <div style="display: flex; gap: 20px; margin-top: 10px; margin-bottom: 30px;">
-                            <div style="flex: 1; background: linear-gradient(135deg, #6dd5ed, #2193b0); padding: 25px 15px; border-radius: 12px; color: white; text-align: center; box-shadow: 0 4px 15px rgba(33, 147, 176, 0.3);">
-                                <div style="font-size: 15px; opacity: 0.9; margin-bottom: 8px; font-weight: 500;">Level 1: Attention (Blue)</div>
-                                <div style="font-size: 30px; font-weight: 800; letter-spacing: 1px; text-shadow: 1px 1px 2px rgba(0,0,0,0.2);">{d_blue}</div>
+                        <style>
+                            .summary-card-container {{
+                                display: flex;
+                                gap: 15px;
+                                margin-bottom: 30px;
+                            }}
+                            .summary-card {{
+                                flex: 1;
+                                background: white; 
+                                padding: 25px 20px;
+                                border-radius: 12px;
+                                box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+                                transition: background-color 0.3s ease, transform 0.2s ease;
+                                cursor: pointer; 
+                            }}
+                            .summary-card:hover {{
+                                background-color: #f1f3f5 !important; 
+                                transform: translateY(-3px); 
+                            }}
+                        </style>
+
+                        <div style="margin-top: 15px; margin-bottom: 10px; padding-left: 5px;">
+                            <span style="font-size: 20px; font-weight: 800; color: #333; letter-spacing: 0.5px;">Early Warning Timeline Summary</span>
+                        </div>
+                        
+                        <div class="summary-card-container">
+                            <div class="summary-card" style="border-left: 8px solid #1f77b4;">
+                                <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 1: Attention (Blue)</div>
+                                <div style="font-size: 28px; color: #1f77b4; font-weight: 800; letter-spacing: 0.5px;">{d_blue}</div>
                             </div>
-                            <div style="flex: 1; background: linear-gradient(135deg, #fceabb, #f8b500); padding: 25px 15px; border-radius: 12px; color: white; text-align: center; box-shadow: 0 4px 15px rgba(248, 181, 0, 0.3);">
-                                <div style="font-size: 15px; opacity: 0.9; margin-bottom: 8px; font-weight: 500;">Level 2: Caution (Orange)</div>
-                                <div style="font-size: 30px; font-weight: 800; letter-spacing: 1px; text-shadow: 1px 1px 2px rgba(0,0,0,0.2);">{d_orange}</div>
+                            <div class="summary-card" style="border-left: 8px solid #ff7f0e;">
+                                <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 2: Caution (Orange)</div>
+                                <div style="font-size: 28px; color: #ff7f0e; font-weight: 800; letter-spacing: 0.5px;">{d_orange}</div>
                             </div>
-                            <div style="flex: 1; background: linear-gradient(135deg, #ff4b1f, #ff9068); padding: 25px 15px; border-radius: 12px; color: white; text-align: center; box-shadow: 0 4px 15px rgba(255, 75, 31, 0.3);">
-                                <div style="font-size: 15px; opacity: 0.9; margin-bottom: 8px; font-weight: 500;">Level 3: Alert (Red)</div>
-                                <div style="font-size: 30px; font-weight: 800; letter-spacing: 1px; text-shadow: 1px 1px 2px rgba(0,0,0,0.2);">{d_red}</div>
+                            <div class="summary-card" style="border-left: 8px solid #d62728;">
+                                <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 3: Alert (Red)</div>
+                                <div style="font-size: 28px; color: #d62728; font-weight: 800; letter-spacing: 0.5px;">{d_red}</div>
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
-
+                       
                         st.divider()
 
                 except Exception as e:
