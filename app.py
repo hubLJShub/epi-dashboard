@@ -18,15 +18,17 @@ try:
         analyze_train_distribution,
         predict_new_data_probability
     )
+    
     # 새로 업데이트된 시각화 함수들로 임포트 변경
     from src.visualization import (
-        # K_means_visualization, 
         early_warning_visualization, 
         early_warning_visualization_bootstrap, 
         visualization_real_time_early_detection,
         visualization_season,
         interactive_real_time_chart
     )
+        # K_means_visualization, 
+
     # 시즌 세팅 및 하키스틱 모듈 추가
     from src.season_setting import set_season_start_week,  hockey_stick_regression, filter_data
 except ImportError as e:
