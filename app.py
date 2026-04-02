@@ -205,7 +205,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tab1, tab2, tab3 = st.tabs(["Manual & Settings Guide", "Dashboard Analysis", "논문요약페이지"])
+tab1, tab2 = st.tabs(["Manual & Settings Guide", "Dashboard Analysis"])
 
 # with tab1:
 #     st.markdown("###  Detailed Instructions & Defaults")
@@ -620,45 +620,45 @@ with tab2:
         </div>
         """, unsafe_allow_html=True)
 
-with tab3:
-    st.markdown("### Detailed Paper")
-    # 기존 HTML 블록 100% 유지
-    st.markdown("""
-    <div style="background-color: #ffffff; padding: 25px; border: 1px solid #ddd; border-radius: 10px; font-size: 18px; line-height: 1.8;">
-        <div style="background-color: #e8f4f8; padding: 15px; border-radius: 8px; margin-bottom: 25px; border-left: 5px solid #2e86c1;">
-            <strong> Default Data Notice:</strong><br>
-            If no Excel file is uploaded, the system automatically loads the internal 
-            <strong>South Korea Influenza Surveillance Data (KDCA)</strong>.
-        </div>
-        <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px; margin-top: 0;">1. Data Input</h3>
-        <ul style="margin-bottom: 30px;">
-            <li><strong>Target Column:</strong> The column representing patient counts.<br>
-            <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-             Default: <b>ILI</b> (Influenza-like Illness)</span></li>
-            <li><strong>Date Column:</strong> The column containing date information (YYYY-MM-DD).<br>
-            <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-             Default: Automatically detected (e.g., <b>date</b>, <b>일자</b>)</span></li>
-        </ul>
-        <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px;">2. Period Settings</h3>
-        <ul style="margin-bottom: 30px;">
-            <li><strong>Start Date:</strong> The beginning date for the entire analysis period.<br>
-            <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-             Default: <b>2017-01-01</b></span></li>
-            <li><strong>Train End Date:</strong> The cutoff date for the training dataset.<br>
-            <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-             Default: <b>2024-09-15</b></span></li>
-            <li><strong>Test End Date:</strong> The end date for the prediction simulation.<br>
-            <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-             Default: <b>Latest Date</b> available in data</span></li>
-        </ul>
-        <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px;">3. Algorithm Parameters</h3>
-        <ul>
-            <li><strong>Window Size:</strong> The number of weeks used to group data for trend analysis.<br>
-            <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-             Default: <b>12 Weeks</b></span></li>
-            <li><strong>Bootstrap Iterations:</strong> The number of resampling iterations for the ensemble model.<br>
-            <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-             Default: <b>1000 Iterations</b> (Higher = More stable but slower)</span></li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
+# with tab3:
+#     st.markdown("### Detailed Paper")
+#     # 기존 HTML 블록 100% 유지
+#     st.markdown("""
+#     <div style="background-color: #ffffff; padding: 25px; border: 1px solid #ddd; border-radius: 10px; font-size: 18px; line-height: 1.8;">
+#         <div style="background-color: #e8f4f8; padding: 15px; border-radius: 8px; margin-bottom: 25px; border-left: 5px solid #2e86c1;">
+#             <strong> Default Data Notice:</strong><br>
+#             If no Excel file is uploaded, the system automatically loads the internal 
+#             <strong>South Korea Influenza Surveillance Data (KDCA)</strong>.
+#         </div>
+#         <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px; margin-top: 0;">1. Data Input</h3>
+#         <ul style="margin-bottom: 30px;">
+#             <li><strong>Target Column:</strong> The column representing patient counts.<br>
+#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
+#              Default: <b>ILI</b> (Influenza-like Illness)</span></li>
+#             <li><strong>Date Column:</strong> The column containing date information (YYYY-MM-DD).<br>
+#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
+#              Default: Automatically detected (e.g., <b>date</b>, <b>일자</b>)</span></li>
+#         </ul>
+#         <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px;">2. Period Settings</h3>
+#         <ul style="margin-bottom: 30px;">
+#             <li><strong>Start Date:</strong> The beginning date for the entire analysis period.<br>
+#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
+#              Default: <b>2017-01-01</b></span></li>
+#             <li><strong>Train End Date:</strong> The cutoff date for the training dataset.<br>
+#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
+#              Default: <b>2024-09-15</b></span></li>
+#             <li><strong>Test End Date:</strong> The end date for the prediction simulation.<br>
+#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
+#              Default: <b>Latest Date</b> available in data</span></li>
+#         </ul>
+#         <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px;">3. Algorithm Parameters</h3>
+#         <ul>
+#             <li><strong>Window Size:</strong> The number of weeks used to group data for trend analysis.<br>
+#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
+#              Default: <b>12 Weeks</b></span></li>
+#             <li><strong>Bootstrap Iterations:</strong> The number of resampling iterations for the ensemble model.<br>
+#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
+#              Default: <b>1000 Iterations</b> (Higher = More stable but slower)</span></li>
+#         </ul>
+#     </div>
+#     """, unsafe_allow_html=True)
