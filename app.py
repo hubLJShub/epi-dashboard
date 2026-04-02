@@ -201,7 +201,7 @@ st.markdown("""
     <strong style="font-size: 22px;">[System Description]</strong><br>
     This dashboard is designed for the early detection of infectious diseases.<br>
     Please upload your data in the sidebar on the left, configure the settings below, and click <strong>'Start Analysis'</strong>.<br><br>
-    <em>For detailed instructions on the settings, please refer to <strong>Tab 1</strong> below.</em>
+    <em>For detailed instructions on the settings, please refer to <strong>Manual & Settings Guide</strong> below.</em>
 </div>
 """, unsafe_allow_html=True)
 
