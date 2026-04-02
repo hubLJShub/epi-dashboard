@@ -185,7 +185,7 @@ with st.sidebar:
     st.header("2. Parameters")
     
     # 꼭 필요한 파라미터만 남겨둡니다.
-    boot_num = st.number_input("Bootstrap Iterations", 50, 2000, 1000, step=50, key="boot_num_input")
+    boot_num = st.number_input("Bootstrap Iterations", 50, 2000, 200, step=50, key="boot_num_input")
     HockeyStick_type = st.selectbox("Hockey Stick Type", ["linear", "exponential"], key="hockey_type_select")
     
     st.markdown("---")
