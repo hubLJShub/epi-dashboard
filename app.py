@@ -1,45 +1,45 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import os
+from pathlib import Path
 
-# -----------------------------------------------------------------------------
-# [Backend Import] - 새로운 알고리즘 모듈 추가
-# -----------------------------------------------------------------------------
+# Import the modules used across preprocessing, modeling, and visualization.
 try:
     from config import Config
-    from src.preprocessing import make_raw, cumulative_sum, cumulative_sum_3years
+    from src.preprocessing import make_raw, cumulative_sum_hybrid
     from src.clustering import (
         K_means_clustering, 
-        find_warning_periods, # 추가됨
+        find_warning_periods,
         train_bootstrap_ensemble, 
         analyze_train_distribution,
-        predict_new_data_probability
+        analyze_distribution_with_bootstrap,
+        predict_new_data_probability,
+        summarize_detection_progression
     )
-    
-    # 새로 업데이트된 시각화 함수들로 임포트 변경
     from src.visualization import (
         early_warning_visualization_bootstrap, 
+        overall_period_visualization_bootstrap,
         visualization_season,
-        interactive_real_time_chart
+        interactive_real_time_chart,
+        interactive_real_time_chart_combined
     )
-# K_means_visualization, 
-# early_warning_visualization, 
-# visualization_real_time_early_detection,
-
-
-
-    # 시즌 세팅 및 하키스틱 모듈 추가
-    from src.season_setting import set_season_start_week,  hockey_stick_regression, filter_data
+    from src.season_setting import (
+        set_season_start_week,
+        hockey_stick_regression,
+        assign_analysis_periods,
+    )
 except ImportError as e:
     st.error(f"Failed to import modules from src folder.\nError: {e}")
     st.stop()
 
-# -----------------------------------------------------------------------------
-# [캐싱 함수] 무거운 연산 (윈도우 최적화)
-# -----------------------------------------------------------------------------
+def format_alert_date(date_value, fallback="Not detected"):
+    parsed = pd.to_datetime(date_value, errors='coerce')
+    if pd.isna(parsed):
+        return fallback
+    return parsed.strftime('%Y-%m-%d')
+
+# Choose the sliding-window size that best aligns clustering alerts with hockey-stick breakpoints.
 @st.cache_resource
 def optimize_window_size(_data, epi, hockey_date, seasons, peak_start):
     sample_window_list = np.arange(3, 25)
@@ -65,24 +65,19 @@ def optimize_window_size(_data, epi, hockey_date, seasons, peak_start):
     best_window = score_list.index(best_score) + int(sample_window_list[0])
     return best_window, best_score
 
-# -----------------------------------------------------------------------------
-# 1. Page Configuration
-# -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="Epidemic Early Detection System",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# -----------------------------------------------------------------------------
-# 2. Sidebar: Settings
-# -----------------------------------------------------------------------------
 with st.sidebar:
     st.title("Settings")
     
     st.header("1. Data Input")
     uploaded_file = st.file_uploader("Upload Excel File (.xlsx)", type=["xlsx", "xls"])
     
+    # Load either the uploaded file or the default local dataset.
     @st.cache_data
     def load_data(file):
         if file is not None:
@@ -97,14 +92,12 @@ with st.sidebar:
     if raw_data is not None:
         all_cols = raw_data.columns.tolist()
         
-        # default_idx = all_cols.index(Config.EPI_COL) if hasattr(Config, 'EPI_COL') and Config.EPI_COL in all_cols else (1 if len(all_cols) > 1 else 0)
-        # 🌟 대표적인 질병 키워드 사전 (대소문자 무관하게 탐지)
+        # Infer a sensible default target column from common disease-related column names.
         disease_keywords = ['ili', 'noro', 'hfmd', 'hrsv', 'covid', 'flu', 'patient', 'cases']
         
         target_default_idx = 0
         found = False
         
-        # 1순위: 엑셀 컬럼명 중에 질병 키워드가 포함되어 있는지 스캔!
         for i, col in enumerate(all_cols):
             col_lower = str(col).lower()
             if any(keyword in col_lower for keyword in disease_keywords):
@@ -112,13 +105,10 @@ with st.sidebar:
                 found = True
                 break
         
-        # 2순위: 다 못 찾았으면 두 번째 컬럼(index 1)을 기본값으로 설정
         if not found and len(all_cols) > 1:
             target_default_idx = 1
                 
-        # 셀렉트박스 생성 (상태 유지를 위한 key 포함)
         target_col = st.selectbox("Target Column (EPI_COL)", all_cols, index=target_default_idx, key="target_col_select")
-        # target_col = st.selectbox("Target Column (EPI_COL)", all_cols, index=default_idx, key="target_col_select")
         
         date_default_idx = 0
         if 'Date' in all_cols:          
@@ -147,53 +137,139 @@ with st.sidebar:
     else:
         st.warning("No data loaded.")
         st.stop()
+    manual_start_week = 1
 
-    # st.markdown("---")
-    # st.header("2. Period Settings")
+    # Require at least four years of data before the fitting end date.
+    min_data_date = raw_data[date_col].min().normalize()
+    default_fit_end = min_data_date + pd.DateOffset(years=4)
+    max_data_date = raw_data[date_col].max().normalize()
+    if default_fit_end > max_data_date:
+        default_fit_end = max_data_date
 
-    # # 🌟 1. 위에서 고른 타겟 컬럼 이름(target_col)을 소문자로 변환해서 확인합니다.
-    # target_lower = str(target_col).lower()
-    
-    # # 🌟 2. 질병 이름에 따라 디폴트 시작 주차를 똑똑하게 지정해 줍니다!
-    # if 'noro' in target_lower:
-    #     default_start = 20
-    # elif 'ili' in target_lower or 'hfmd' in target_lower:
-    #     default_start = 1
-    # else:
-    #     default_start = 1  # 혹시 모를 다른 질병을 위한 기본값
-        
-    # # 만약 session_state에 이전 값이 남아있어서 안 바뀌는 현상을 막기 위해 강제로 업데이트!
-    # if 'prev_target' not in st.session_state or st.session_state.prev_target != target_col:
-    #     st.session_state['start_week_input'] = default_start
-    #     st.session_state.prev_target = target_col
+    fit_input_mode = st.radio(
+        "Fitting End Input Type",
+        ["Date", "Year / Week"],
+        horizontal=True,
+        help="Choose either a calendar date or a year/week pair."
+    )
 
-    # # 🌟 3. 계산된 default_start를 입력창에 넣어줍니다.
-    # manual_start_week = st.number_input(
-    # "Set Season Start Week (1~52)", 
-    # min_value=1, max_value=52, step=1,
-    # help="Recommended: 1 for ILI/HFMD, 20~37 for Norovirus.",
-    # key="start_week_input"
-    # )
-    
-    # train_date = None
-    # test_date = None
-    manual_start_week = 1   
-    train_date = None
-    test_date = None
+    fit_end_date_direct = st.date_input(
+        "Fitting End Date",
+        value=default_fit_end.to_pydatetime(),
+        min_value=min_data_date.to_pydatetime(),
+        max_value=max_data_date.to_pydatetime(),
+        disabled=(fit_input_mode != "Date"),
+        help="At least 4 years of data are required before the fitting end date."
+    )
+
+    fit_date_lookup = (
+        raw_data[[date_col]]
+        .assign(
+            FitYear=raw_data[date_col].dt.year.astype(int),
+            FitWeek=raw_data[date_col].dt.isocalendar().week.astype(int)
+        )
+        .drop_duplicates()
+        .sort_values(date_col)
+        .reset_index(drop=True)
+    )
+
+    available_fit_years = fit_date_lookup["FitYear"].drop_duplicates().tolist()
+    default_fit_year = int(default_fit_end.year)
+    default_fit_year_idx = (
+        available_fit_years.index(default_fit_year)
+        if default_fit_year in available_fit_years
+        else max(0, len(available_fit_years) - 1)
+    )
+
+    fit_year = st.selectbox(
+        "Fitting End Year",
+        available_fit_years,
+        index=default_fit_year_idx,
+        disabled=(fit_input_mode != "Year / Week"),
+    )
+
+    available_fit_weeks = (
+        fit_date_lookup.loc[fit_date_lookup["FitYear"] == fit_year, "FitWeek"]
+        .drop_duplicates()
+        .sort_values()
+        .tolist()
+    )
+    default_fit_week = int(default_fit_end.isocalendar().week)
+    default_fit_week_idx = (
+        available_fit_weeks.index(default_fit_week)
+        if default_fit_week in available_fit_weeks
+        else max(0, len(available_fit_weeks) - 1)
+    )
+
+    fit_week = st.selectbox(
+        "Fitting End Week",
+        available_fit_weeks,
+        index=default_fit_week_idx,
+        disabled=(fit_input_mode != "Year / Week"),
+    )
+
+    if fit_input_mode == "Date":
+        fit_end_date = pd.to_datetime(fit_end_date_direct).normalize()
+    else:
+        fit_candidates = fit_date_lookup.loc[
+            (fit_date_lookup["FitYear"] == fit_year) &
+            (fit_date_lookup["FitWeek"] == fit_week),
+            date_col
+        ]
+        if fit_candidates.empty:
+            st.error("No valid date was found for the selected year/week.")
+            st.stop()
+        fit_end_date = pd.to_datetime(fit_candidates.max()).normalize()
+        st.caption(f"Resolved fitting end date: {fit_end_date.date()}")
 
     st.markdown("---")
-    st.header("2. Parameters")
+    st.header("2. Optional Reference Dates")
+
+    reference_file = st.file_uploader(
+        "Upload Reference Date File (.xlsx)",
+        type=["xlsx", "xls"],
+        key="reference_date_file"
+    )
+
+    reference_dates = None
+    reference_label = None
+
+    if reference_file is not None:
+        reference_data = pd.read_excel(reference_file)
+        reference_cols = reference_data.columns.tolist()
+
+        reference_date_default_idx = 0
+        if 'Date' in reference_cols:
+            reference_date_default_idx = reference_cols.index('Date')
+        elif 'date' in reference_cols:
+            reference_date_default_idx = reference_cols.index('date')
+        else:
+            reference_candidates = [c for c in reference_cols if 'date' in str(c).lower()]
+            if reference_candidates:
+                reference_date_default_idx = reference_cols.index(reference_candidates[0])
+
+        reference_date_col = st.selectbox(
+            "Reference Date Column",
+            reference_cols,
+            index=reference_date_default_idx,
+            key="reference_date_col_select"
+        )
+
+        reference_dates = pd.to_datetime(reference_data[reference_date_col], errors='coerce').dropna().tolist()
+        reference_label = f"User Input Date ({Path(reference_file.name).stem})"
+
+        if len(reference_dates) == 0:
+            st.warning("No valid dates were found in the uploaded reference date file.")
+
+    st.markdown("---")
+    st.header("3. Parameters")
     
-    # 꼭 필요한 파라미터만 남겨둡니다.
     boot_num = st.number_input("Bootstrap Iterations", 50, 2000, 200, step=50, key="boot_num_input")
-    HockeyStick_type = st.selectbox("Hockey Stick Type", ["linear", "exponential"], key="hockey_type_select")
+    HockeyStick_type = "linear"
     
     st.markdown("---")
     run_btn = st.button("Start Analysis", type="primary")
 
-# -----------------------------------------------------------------------------
-# 3. Main Logic
-# -----------------------------------------------------------------------------
 st.title("Universal Respiratory Epidemic Early Detection System")
 
 st.markdown("""
@@ -201,51 +277,12 @@ st.markdown("""
     <strong style="font-size: 22px;">[System Description]</strong><br>
     This dashboard is designed for the early detection of infectious diseases.<br>
     Please upload your data in the sidebar on the left, configure the settings below, and click <strong>'Start Analysis'</strong>.<br><br>
-    <em>For detailed instructions on the settings, please refer to <strong>Manual & Settings Guide</strong> below.</em>
+    <em>For detailed instructions on the settings, please refer to <strong>Tab 1</strong> below.</em>
 </div>
 """, unsafe_allow_html=True)
 
 tab1, tab2 = st.tabs(["Manual & Settings Guide", "Dashboard Analysis"])
-
-# with tab1:
-#     st.markdown("###  Detailed Instructions & Defaults")
-    
-#     st.markdown("""
-#     <div style="background-color: #ffffff; padding: 25px; border: 1px solid #ddd; border-radius: 10px; font-size: 18px; line-height: 1.8;">
-#         <div style="background-color: #e8f4f8; padding: 15px; border-radius: 8px; margin-bottom: 25px; border-left: 5px solid #2e86c1;">
-#             <strong> Default Data Notice:</strong><br>
-#             If no Excel file is uploaded, the system automatically loads the internal 
-#             <strong>South Korea Influenza Surveillance Data (KDCA)</strong>.
-#         </div>
-#         <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px; margin-top: 0;">1. Data Input</h3>
-#         <ul style="margin-bottom: 30px;">
-#             <li><strong>Target Column:</strong> The column representing patient counts.<br>
-#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-#              Default: <b>ILI</b> (Influenza-like Illness)</span></li>
-#             <li><strong>Date Column:</strong> The column containing date information (YYYY-MM-DD).<br>
-#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-#              Default: Automatically detected</span></li>
-#         </ul>
-#         <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px;">2. Period Settings</h3>
-#         <ul style="margin-bottom: 30px;">
-#             <li><strong>Dynamic Detection Mode (Default):</strong> The system operates in fully automatic mode by default. The algorithm dynamically detects the optimal season start week and automatically splits the historical data (Train) and the ongoing real-time data (Test).<br>
-#             <span style="color: #2e86c1; font-size: 16px; background-color: #e8f4f8; padding: 2px 8px; border-radius: 4px;">
-#              <b>Highly Recommended</b> for standard real-time monitoring.</span></li>
-#             <li><strong>Manual Parameter Settings:</strong> By checking this option, expert users can override the automated system and manually define the <b>Train End Date</b>, <b>Test End Date</b>, and a specific <b>Season Start Date</b>.</li>
-#         </ul>
-#         <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px;">3. Algorithm Parameters</h3>
-#         <ul>
-#             <li><strong>Bootstrap Iterations (B):</strong> The number of resampling iterations for the ensemble clustering model.<br>
-#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-#              Default: <b>1000 Iterations</b> (Higher = More stable but longer computation)</span></li>
-#             <li><strong>Hockey Stick Type:</strong> The regression method used to detect sudden exponential trend changes at the epidemic onset.<br>
-#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-#              Default: <b>Linear</b></span></li>
-#         </ul>
-#     </div>
-#     """, unsafe_allow_html=True)
 with tab1:
-    # 🌟 대제목 (가장 크게)
     st.markdown("<h2 style='font-size: 32px; font-weight: 800; color: #2c3e50; margin-bottom: 20px;'>Dashboard Guide & Setup</h2>", unsafe_allow_html=True)
     st.markdown("""
     <style>
@@ -266,7 +303,6 @@ with tab1:
     </style>
     """, unsafe_allow_html=True)
 with tab1:
-    # 🌟 [CSS 최적화] 모든 Expander 제목 글자 크기를 24px로 크고 진하게 고정합니다!
     st.markdown("""
     <style>
     div[data-testid="stExpander"] details summary p,
@@ -284,36 +320,24 @@ with tab1:
     }
     </style>
     """, unsafe_allow_html=True)
-    # =========================================================================
-    # 🌟 [최종 수정] 0. Introduction (그림 위치 상단으로 이동 + 고화질)
-    # =========================================================================
     with st.expander("0. Introduction", expanded=True):
-        # 사용자 지정 비율을 유지합니다. [0.5, 2.5]
         col1, col2 = st.columns([0.5, 2.5], gap="large")
         
         with col1:
             import os
             import base64
             
-            # 경로 설정
             current_dir = os.path.dirname(os.path.abspath(__file__))
             img_path = os.path.join(current_dir, "images", "intro_example.png")
             
             try:
-                # 🌟 파일을 base64로 인코딩해서 HTML 안에 직접 쏘아주는 방식
                 with open(img_path, "rb") as image_file:
                     encoded_string = base64.b64encode(image_file.read()).decode()
-                
-                # 🌟 [핵심 해결책] 복잡한 flex, height 100% 다 지웠습니다!
-                # text-align: center로 가운데 정렬만 남기고,
-                # margin-top: -5px; 를 주어서 위로 바짝 끌어올렸습니다. (숫자를 -10px, -20px 등으로 조절하면 더 위로 뚫고 올라갑니다!)
-                # 🌟 [핵심 해결책] margin-bottom: 30px; 를 추가하여 사진 아래에 넉넉한 빈 공간을 만듭니다!
                 st.markdown(f'<div style="text-align: center; margin-top: 5px; margin-bottom: 40px;"><img src="data:image/png;base64,{encoded_string}" width="200" style="border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"></div>', unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"Image load error: {e}")
 
         with col2:
-            # 🌟 [오른쪽: 설명 부분, 중앙 고정을 풀고 사진과 똑같은 여백을 주어 함께 움직이게 묶음!]
             st.markdown("""
             <div style="border-left: 5px solid #1f77b4; background-color: #f8fbff; padding: 20px 25px; border-radius: 0 8px 8px 0; margin-top: 5px; margin-bottom: 40px;">
                 <div style="color: #333; line-height: 1.8;">
@@ -323,22 +347,16 @@ with tab1:
                 </div>
             </div>
             """, unsafe_allow_html=True)
-# 🌟 1. Setting Guide (텍스트 대신 이미지 한 장으로 깔끔하게 대체)
     with st.expander("1. Setting Guide", expanded=False):
         import os
         import base64
         
-        # 경로 설정 (Setting_guide.jpg 파일이 images 폴더 안에 있어야 합니다!)
         current_dir = os.path.dirname(os.path.abspath(__file__))
         setting_img_path = os.path.join(current_dir, "images", "Setting_guide.png")
         
         try:
-            # 파일을 base64로 인코딩해서 HTML 안에 직접 쏘아주는 방식
             with open(setting_img_path, "rb") as image_file:
-                # 🌟 확장자가 png이므로 data:image/png 로 맞춰줍니다!
                 encoded_setting_img = base64.b64encode(image_file.read()).decode()
-            # 🌟 [핵심] 기존 텍스트를 모두 지우고 이미지를 중앙에 띄웁니다.
-            # max-width: 100% 를 주어 모니터 창 크기에 맞춰 이미지가 예쁘게 자동 축소/확대되도록 했습니다.
             st.markdown(f"""
                 <div style="display: flex; justify-content: center; padding: 20px 0;">
                     <img src="data:image/jpeg;base64,{encoded_setting_img}" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
@@ -346,11 +364,9 @@ with tab1:
             """, unsafe_allow_html=True)
             
         except Exception as e:
-            # 이미지를 찾을 수 없을 때 안내 메시지
             st.error(f"Image load error: {e}")
             st.info("💡 'images' 폴더 안에 'Setting_guide.jpg' 파일이 있는지, 파일명 대소문자가 정확한지 확인해주세요!")
 
-    # 🌟 2. Dashboard Analysis (Placeholder)
     with st.expander("2. Dashboard Analysis", expanded=False):
         st.markdown("""
         <div style="border: 2px dashed #ccc; border-radius: 8px; padding: 80px 20px; text-align: center; margin-bottom: 25px; margin-top: 15px; background-color: #fafafa;">
@@ -366,7 +382,7 @@ with tab1:
 
 with tab2:
     if run_btn:
-        status = st.status("Analysis in progress...", expanded=True)
+        status = st.status("Preprocessing...", expanded=True)
         
         try:
             proc_data = raw_data.copy()
@@ -375,61 +391,45 @@ with tab2:
                 proc_data['Year'] = proc_data['Date'].dt.year
             if 'Week' not in proc_data.columns:
                 proc_data['Week'] = proc_data['Date'].dt.isocalendar().week
-            # ---------------------------------------------------------------------
-            # [Step 0.5] Season Dynamics & Train/Test Split
-            # ---------------------------------------------------------------------
-            status.write("1. Running Season Detection...")            
-            # 1. 유행 기준 찾기
+            status.update(label="Preprocessing...", state="running", expanded=True)
             season_df = set_season_start_week(proc_data, target_col)
             seasons = season_df['season'].to_list()
             
-            # 2. 시각화 및 peak_start 획득 
-            # 🌟 사이드바에서 입력한 manual_start_week 값을 그대로 사용합니다!
             peak_start, peak_len = visualization_season(proc_data, season_df, start_week=manual_start_week)
             
-            # 3. Train / Test 분할
-            data = filter_data(proc_data, seasons, start_week=peak_start)
-            
-            status.write("Calculating Break Points (Hockey Stick)...")
-            hockey_date, hockey_df = hockey_stick_regression(data, target_col, HockeyStick_type, seasons)
-            # ---------------------------------------------------------------------
-            # [Step 0] Data Preprocessing (CUSUM Calculation)
-            # ---------------------------------------------------------------------
-            status.write("2. Preprocessing (CUSUM Calculation)...")
-            
-            # (이하 기존 CUSUM 계산 코드 그대로 유지)
-            data['cusum'] = np.nan 
+            fit_end_date = pd.to_datetime(fit_end_date)
+            if fit_end_date < (proc_data['Date'].min() + pd.DateOffset(years=4)):
+                st.error("Fitting End Date must be at least 4 years after the first available date.")
+                st.stop()
 
-            train_df = data[data['set'] == 'train'].copy()
-            train_cusum_result = cumulative_sum(train_df, target_col, season_start_week=peak_start)
-            data.loc[data['set'] == 'train', 'cusum'] = train_cusum_result['cusum'].values
+            data, period_meta = assign_analysis_periods(
+                proc_data,
+                seasons,
+                start_week=peak_start,
+                fit_end_date=fit_end_date
+            )
             
-            test_cusum_result = cumulative_sum_3years(data.copy(), target_col, season_start_week=peak_start)
-            data.loc[data['set'] == 'test', 'cusum'] = test_cusum_result.loc[data['set'] == 'test', 'cusum'].values
+            status.update(label="Preprocessing...", state="running", expanded=True)
+            hockey_date, hockey_df = hockey_stick_regression(data, target_col, HockeyStick_type, seasons)
+            status.update(label="Preprocessing...", state="running", expanded=True)
+            cusum_result = cumulative_sum_hybrid(data.copy(), target_col, season_start_week=peak_start)
+            data['cusum'] = cusum_result['cusum'].values
             
             data.reset_index(drop=True, inplace=True)
             data['num'] = data.index
             
             proc_data = data.copy()
 
-            # ---------------------------------------------------------------------
-            # [Step 1] Window Size Optimization & Split
-            # ---------------------------------------------------------------------
-            status.write("3. Optimizing Window Size & Splitting Data...")
-            
-            # [수정됨] if/else 조건문을 완전히 삭제하고, 무조건 자동 최적화를 실행합니다!
+            status.update(label="Analyzing...", state="running", expanded=True)
             best_window, best_score = optimize_window_size(proc_data, target_col, hockey_date, seasons, peak_start)
             st.toast(f"Optimal Window Size Auto-selected: {best_window} Weeks")
                 
             df_train, data_all_train = make_raw(proc_data, 'train', best_window, target_col)
             df_train = df_train.dropna()
 
-            status.write(f"Train Window Generated ({len(df_train)} samples, Window Size: {best_window})")
+            status.update(label="Analyzing...", state="running", expanded=True)
 
-            # ---------------------------------------------------------------------
-            # [Step 2] Model Training
-            # ---------------------------------------------------------------------
-            status.write(f"4. Training Baseline & Bootstrap Ensemble (B={boot_num})...")
+            status.update(label="Analyzing...", state="running", expanded=True)
             
             feature_col = ['slope', 'mean', 'CS_mean']
             feature_name = [r'$\beta_{\omega}$', r'$\mu_{\omega}$', r'$\widebar{S_{\omega}}$']
@@ -439,69 +439,211 @@ with tab2:
             warning_label_t = result_data_t['label'].max()
             ED_date = find_warning_periods(result_data_t, data_all_train, peak_start, warning_label_t)
             
-            # Bootstrap Training
             boot_ensemble, scaler = train_bootstrap_ensemble(df_train, scaler, feature_col, B=boot_num, k_best=best_k, types='random')
-            
-            status.write("Model Training Complete")
+            status.update(label="Analyzing...", state="running", expanded=True)
 
-            # ---------------------------------------------------------------------
-            # [Step 3] Distribution Analysis
-            # ---------------------------------------------------------------------
-            status.write("5. Analyzing Train Distribution...")
+            status.update(label="Visualizing...", state="running", expanded=True)
             
             date_df, label_df = analyze_train_distribution(df_train, data_all_train, feature_col, boot_ensemble, scaler, peak_start, ED_date)
+            train_season_summaries = {}
+            for season in date_df.columns:
+                _, summary = summarize_detection_progression(date_df[season])
+                train_season_summaries[int(season)] = summary
+
+            overall_plot_data = proc_data.copy()
+            overall_plot_data['set'] = 'train'
+            df_overall, data_all_overall = make_raw(overall_plot_data, 'train', best_window, target_col)
+            valid_overall_mask = df_overall[feature_col].notna().all(axis=1)
+            df_overall = df_overall.loc[valid_overall_mask].reset_index(drop=True)
+            data_all_overall = data_all_overall.loc[valid_overall_mask].reset_index(drop=True)
+            overall_date_df, overall_label_df = analyze_distribution_with_bootstrap(
+                df_overall,
+                data_all_overall,
+                feature_col,
+                boot_ensemble,
+                scaler,
+                peak_start
+            )
             
-            # ---------------------------------------------------------------------
-            # 4. Visualization (Train)
-            # ---------------------------------------------------------------------
             st.markdown("---")
             st.header("Analysis Report")
 
-            # 정답지 비교를 위한 Other dates 설정
-            start_epidemic = [pd.to_datetime('2017-12-03'), pd.to_datetime('2018-11-18'), pd.to_datetime('2019-11-17'), pd.to_datetime('2022-09-18'), pd.to_datetime('2023-09-17'), pd.to_datetime('2024-12-22'), pd.to_datetime('2025-10-17')]
-            CPD_date= [pd.to_datetime('2017-07-23'), pd.to_datetime('2018-12-02'), pd.to_datetime('2019-12-08'), pd.to_datetime('2022-07-03'), pd.to_datetime('2023-09-17'), pd.to_datetime('2024-12-22')]
-            other_dates = {'CUSUM': CPD_date, 'KDCA': start_epidemic}
+            train_display_dates = proc_data.loc[proc_data['set'] == 'train', 'Date']
+            fit_display_start = train_display_dates.min() if not train_display_dates.empty else proc_data['Date'].min()
 
-            # st.subheader("1. Baseline Model Cluster Characteristics (Boxplot)")
-            
-            # # Boxplot 
-            # fig_box, axes = plt.subplots(1, 3, figsize=(15, 5))
-            # sns.boxplot(x='label', y='slope', data=result_data_t, ax=axes[0], hue='label', palette='Set1')
-            # axes[0].set_title('Slope Distribution')
-            # sns.boxplot(x='label', y='mean', data=result_data_t, ax=axes[1], hue='label', palette='Set1')
-            # axes[1].set_title('Mean Distribution')
-            # sns.boxplot(x='label', y='CS_mean', data=result_data_t, ax=axes[2], hue='label', palette='Set1')
-            # axes[2].set_title('CUSUM Mean Distribution')
-            # st.pyplot(fig_box, use_container_width=False)
+            fitting_period_text = (
+                f"{fit_display_start.strftime('%Y/%m/%d')} ~ "
+                f"{period_meta['fit_end_date_user'].strftime('%Y/%m/%d')}"
+            )
+            realtime_period_text = (
+                f"{period_meta['simulation_start'].strftime('%Y/%m/%d')} ~ "
+                f"{proc_data['Date'].max().strftime('%Y/%m/%d')}"
+            )
 
-            # # 기존 HTML 설명 박스 유지
-            # st.markdown("""
-            # <div style="background-color: #f9f9f9; padding: 10px; border-left: 5px solid #2e86c1; margin-bottom: 10px;">
-            #     <span style="font-size: 24px;"><strong>1. Baseline Cluster Characteristics</strong></span><br>
-            #     <span style="font-size: 20px;">
-            #         <ul>
-            #             <li>The optimal number of clusters <strong>K</strong> was selected based on the silhouette coefficient.</li>
-            #             <li>Clusters were ordered according to their corresponding <strong>&beta;<sub>&omega;</sub></strong> values.</li>
-            #             <li>An outbreak was detected in the third week when the cluster with the largest <strong>&beta;<sub>&omega;</sub></strong> was observed for three consecutive weeks.</li>
-            #         </ul>
-            #     </span>
-            # </div>
-            # """, unsafe_allow_html=True)
-            # st.markdown("---")
+            st.markdown("""
+            <style>
+                .period-card-grid {
+                    display: grid;
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    gap: 20px;
+                    margin: 14px 0 30px 0;
+                }
+                .period-card {
+                    background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+                    border: 1px solid #dbe4f0;
+                    border-radius: 18px;
+                    padding: 22px 22px 20px 22px;
+                    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+                    min-height: 220px;
+                    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+                }
+                .period-card:hover {
+                    transform: translateY(-4px);
+                    box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12);
+                    border-color: #bfdbfe;
+                }
+                .period-card-title {
+                    font-size: 16px;
+                    font-weight: 800;
+                    color: #334155;
+                    margin-bottom: 14px;
+                    letter-spacing: 0.25px;
+                }
+                .period-card-main {
+                    font-size: 30px;
+                    font-weight: 800;
+                    color: #0f172a;
+                    margin-bottom: 18px;
+                    line-height: 1.3;
+                }
+                .period-card-label {
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: #64748b;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 6px;
+                }
+                .period-card-detail {
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: #1e293b;
+                    line-height: 1.55;
+                    margin-bottom: 16px;
+                }
+                .period-card-note {
+                    font-size: 14px;
+                    color: #475569;
+                    line-height: 1.7;
+                    white-space: pre-line;
+                    margin-top: 0;
+                }
+                .report-nav {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 12px;
+                    margin: 2px 0 26px 0;
+                }
+                .report-nav a {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 10px 16px;
+                    border-radius: 999px;
+                    border: 1px solid #cbd5e1;
+                    background: #ffffff;
+                    color: #1e293b;
+                    font-size: 14px;
+                    font-weight: 700;
+                    text-decoration: none;
+                    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+                    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+                }
+                .report-nav a:hover {
+                    transform: translateY(-2px);
+                    border-color: #93c5fd;
+                    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.10);
+                }
+                .report-anchor {
+                    display: block;
+                    position: relative;
+                    top: -84px;
+                    visibility: hidden;
+                }
+                @media (max-width: 900px) {
+                    .period-card-grid {
+                        grid-template-columns: 1fr;
+                    }
+                }
+            </style>
+            """, unsafe_allow_html=True)
 
-            st.subheader("1. Bootstrap Early Warning Detection")
+            st.markdown(f"""
+            <div class="period-card-grid">
+                <div class="period-card">
+                    <div class="period-card-title">Fitting Period</div>
+                    <div class="period-card-main">{fitting_period_text}</div>
+                    <div class="period-card-label">Model fitting range</div>
+                    <div class="period-card-detail">The first 3 years are reserved for feature extraction and are not used in fitting.</div>
+                </div>
+                <div class="period-card">
+                    <div class="period-card-title">Real-time Monitoring</div>
+                    <div class="period-card-main">{realtime_period_text}</div>
+                    <div class="period-card-label">Simulation range</div>
+                    <div class="period-card-detail">Simulation starts immediately after the selected fitting end date and proceeds season by season.</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("""
+            <div class="report-nav">
+                <a href="#overall-period-analysis">1. Overall</a>
+                <a href="#fitting-period-analysis">2. Fitting Period</a>
+                <a href="#simulation-analysis">3. Simulation</a>
+            </div>
+            """, unsafe_allow_html=True)
+
+            other_dates = None
+            if reference_dates is not None and len(reference_dates) > 0:
+                other_dates = {reference_label or 'User Input Date': reference_dates}
+
+
+            st.markdown('<span id="overall-period-analysis" class="report-anchor"></span>', unsafe_allow_html=True)
+            st.subheader("1. Overall Period Analysis")
+            fig_overall = overall_period_visualization_bootstrap(
+                proc_data,
+                target_col,
+                other_dates,
+                hockey_date,
+                overall_date_df,
+                best_window,
+                period_meta['fit_end_date_user']
+            )
+            st.plotly_chart(fig_overall, use_container_width=True)
+
+            st.markdown("""
+            <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #2e86c1; margin-bottom: 20px;">
+                <span style="font-size: 22px;"><strong>Overall Period Analysis</strong></span><br>
+                <span style="font-size: 16px; color: #444; line-height: 1.6;">
+                    <ul style="margin-top: 10px;">
+                        <li>This panel shows the full original time series for context.</li>
+                        <li>The blue shaded area marks the fitting period.</li>
+                        <li>The red shaded area marks the simulation period.</li>
+                    </ul>
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown("---")
+
+            st.markdown('<span id="fitting-period-analysis" class="report-anchor"></span>', unsafe_allow_html=True)
+            st.subheader("2. Bootstrap Early Warning Detection")
             
             # 새로운 시각화 함수 적용
             fig1 = early_warning_visualization_bootstrap(
                 proc_data, data_all_train, target_col, other_dates, hockey_date, date_df, best_window
             )
             
-            # 두 개의 그래프를 차례대로 Streamlit에 띄웁니다!
-            # st.pyplot(fig1, use_container_width=False)
-            st.plotly_chart(fig1, use_container_width=True)  # 동적 그래프 출력
-            # st.markdown("<br>", unsafe_allow_html=True) # 그래프 사이 간격 살짝 띄우기
-            # st.pyplot(fig2, use_container_width=False)
-            # st.pyplot(fig_boot, use_container_width=False)
+            st.plotly_chart(fig1, use_container_width=True)
                 
             st.markdown("""
             <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #2e86c1; margin-bottom: 20px;">
@@ -509,50 +651,137 @@ with tab2:
                 <span style="font-size: 16px; color: #444; line-height: 1.6;">
                     <ul style="margin-top: 10px;">
                         <li><strong style="color: #2CA02C;">Green Line (Hockey Stick)</strong>: Identifies the structural break point in the epidemic curve. This mathematical approach automatically optimizes the sliding window size by detecting the exact moment the trend shifts to exponential growth.</li>
-                        <li><strong style="color: #1F77B4;">Blue Dashed Line</strong>: Represents the most robust and frequently observed early detection time across all bootstrap ensemble clustering models.</li>
-                        <li><strong style="color: #85C1E9;">Blue Shaded Area</strong>: Visualizes the variability (uncertainty) of the detection time across the <i>B</i> bootstrap iterations, providing a confidence interval for the warning signal.</li>
+                        <li><strong style="color: #1F77B4;">Blue / Orange / Red Dashed Lines</strong>: Mark the first dates when the cumulative bootstrap detection share becomes positive, reaches 5%, and reaches 10% within each season.</li>
+                        <li><strong>Cumulative Bars</strong>: Show how many bootstrap models have already issued their first warning by each date.</li>
                     </ul>
                 </span>
             </div>
             """, unsafe_allow_html=True)
             st.markdown("---")
             
-            # =====================================================================
-            # [Section 2] Real-time Surveillance
-            # =====================================================================
-            st.subheader("2. Real-time Surveillance")
+            st.markdown('<span id="simulation-analysis" class="report-anchor"></span>', unsafe_allow_html=True)
+            st.subheader("3. Real-time Surveillance")
+            status.update(label="Simulation in Progress...", state="running", expanded=True)
             
-            if (train_date is not None) and (test_date is not None) and (test_date <= train_date):
-                st.warning("Test End Date must be later than Train End Date.")
-            else:
-                status.write("6. Generating Test Data & Real-time Surveillance...")
-                
-                df_test, data_all_test = make_raw(proc_data, 'test', best_window, target_col)
-                
-                try:
-                    if df_test.empty:
-                        st.error("No valid Test data available in the selected range.")
-                    else:
-                        # 신규 알고리즘의 실시간 예측 로직 적용
-                        prob_table, date_table, bootstrap_dates, incremental_prob_results = predict_new_data_probability(
-                            df_test, data_all_test, boot_ensemble, scaler, peak_start, step=1
-                        )
-                        date_table['Detect_date'] = date_table['Detect_date'].apply(lambda x: x[0] if isinstance(x, list) and len(x) > 0 else x)
-                        
-                        status.write("Surveillance Complete! Generating Visualizations...")
+            try:
+                test_seasons = period_meta['test_seasons']
+                if not test_seasons:
+                    st.error("No valid Test data available in the selected range.")
+                else:
+                    status.update(label="Simulation Visualization...", state="running", expanded=True)
+                    season_rt_results = []
+                    season_summary_blocks = []
+                    overlap_seasons = set(period_meta.get('overlap_seasons', []))
 
-                        # "Simulation" 단어 제거 후 Surveillance로 통일
-                        # st.markdown("Real-Time Surveillance")
-                        
-                        # 1. 시각화 함수를 실행해서 그림과 날짜 3개를 받아옵니다.
-                        fig_interactive, d_blue, d_orange, d_red = interactive_real_time_chart(
-                            data_all=data_all_test, 
-                            bootstrap_dates=bootstrap_dates, 
-                            other_dates=other_dates, 
-                            epi=target_col
+                    for season in test_seasons:
+                        df_test, data_all_test = make_raw(
+                            proc_data, 'test', best_window, target_col, target_season=season
                         )
-                        
-                        st.plotly_chart(fig_interactive, use_container_width=True)
+
+                        if df_test.empty or data_all_test.empty:
+                            continue
+
+                        feature_cols_rt = ['slope', 'mean', 'CS_mean']
+                        valid_mask = df_test[feature_cols_rt].notna().all(axis=1)
+                        df_test = df_test.loc[valid_mask].reset_index(drop=True)
+                        data_all_test = data_all_test.loc[valid_mask].reset_index(drop=True)
+
+                        if df_test.empty or data_all_test.empty:
+                            st.warning(f"{int(season)}-{int(season)+1} season was skipped because real-time features contained only missing values.")
+                            continue
+
+                        season_test_dates = proc_data.loc[
+                            (proc_data['set'] == 'test') & (proc_data['Season'] == season),
+                            'Date'
+                        ]
+                        if season_test_dates.empty:
+                            continue
+
+                        season_sim_start = season_test_dates.min()
+                        season_start_display = proc_data.loc[proc_data['Season'] == season, 'Date'].min()
+                        season_end_display = proc_data.loc[proc_data['Season'] == season, 'Date'].max()
+                        rt_display_data = proc_data.loc[
+                            (proc_data['Date'] >= season_sim_start) &
+                            (proc_data['Date'] <= season_end_display)
+                        ].copy()
+                        fit_summary = train_season_summaries.get(int(season), {})
+                        fit_red_date = fit_summary.get('red_date')
+                        season_suppressed = (int(season) in overlap_seasons) and pd.notna(pd.to_datetime(fit_red_date, errors='coerce'))
+
+                        detection_timeline = pd.DataFrame(columns=['Date', 'Cumulative_Count', 'Cumulative_Ratio', 'Level'])
+                        shaded_range = None
+
+                        if season_suppressed:
+                            shaded_range = (season_sim_start, season_end_display)
+                            d_blue = "Suppressed"
+                            d_orange = "Suppressed"
+                            d_red = "Suppressed"
+                        else:
+                            initial_detection_dates = date_df[season] if season in overlap_seasons and season in date_df.columns else None
+                            _, _, bootstrap_dates, _ = predict_new_data_probability(
+                                df_test,
+                                data_all_test,
+                                boot_ensemble,
+                                scaler,
+                                peak_start,
+                                step=1,
+                                initial_detection_dates=initial_detection_dates
+                            )
+
+                            final_detect_dates = bootstrap_dates.iloc[:, -1] if not bootstrap_dates.empty else pd.Series(dtype='datetime64[ns]')
+                            detection_timeline, _ = summarize_detection_progression(
+                                final_detect_dates,
+                                monitoring_start=season_sim_start
+                            )
+
+                            _, d_blue, d_orange, d_red = interactive_real_time_chart(
+                                data_all=rt_display_data,
+                                detection_timeline=detection_timeline,
+                                other_dates=other_dates,
+                                epi=target_col,
+                                shaded_range=shaded_range
+                            )
+
+                        season_rt_results.append({
+                            'season': season,
+                            'display_data': rt_display_data,
+                            'detection_timeline': detection_timeline,
+                            'shaded_range': shaded_range,
+                            'season_boundary': season_start_display,
+                            'simulation_start': season_sim_start,
+                            'suppressed': season_suppressed,
+                        })
+
+                        season_summary_blocks.append(f"""
+                        <div style="margin-bottom: 18px;">
+                            <div style="font-size: 18px; font-weight: 800; color: #333; margin-bottom: 10px;">
+                                {int(season)}-{int(season)+1} Season
+                            </div>
+                            <div class="summary-card-container">
+                                <div class="summary-card" style="border-left: 8px solid #1f77b4;">
+                                    <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 1: Attention (Blue)</div>
+                                    <div style="font-size: 28px; color: #1f77b4; font-weight: 800; letter-spacing: 0.5px;">{d_blue}</div>
+                                </div>
+                                <div class="summary-card" style="border-left: 8px solid #ff7f0e;">
+                                    <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 2: Caution (Orange)</div>
+                                    <div style="font-size: 28px; color: #ff7f0e; font-weight: 800; letter-spacing: 0.5px;">{d_orange}</div>
+                                </div>
+                                <div class="summary-card" style="border-left: 8px solid #d62728;">
+                                    <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 3: Alert (Red)</div>
+                                    <div style="font-size: 28px; color: #d62728; font-weight: 800; letter-spacing: 0.5px;">{d_red}</div>
+                                </div>
+                            </div>
+                            {"<div style='font-size: 13px; color: #6b7280; margin-top: -8px;'>Simulation is gray-shaded because this season already triggered a red alert during fitting.</div>" if season_suppressed else ""}
+                        </div>
+                        """)
+
+                    if season_rt_results:
+                        fig_interactive_combined = interactive_real_time_chart_combined(
+                            season_rt_results,
+                            target_col
+                        )
+
+                        st.plotly_chart(fig_interactive_combined, use_container_width=True)
                         st.markdown(f"""
                         <style>
                             .summary-card-container {{
@@ -576,33 +805,19 @@ with tab2:
                         </style>
 
                         <div style="margin-top: 15px; margin-bottom: 10px; padding-left: 5px;">
-                            <span style="font-size: 20px; font-weight: 800; color: #333; letter-spacing: 0.5px;">Early Warning Timeline Summary</span>
+                            <span style="font-size: 20px; font-weight: 800; color: #333; letter-spacing: 0.5px;">Early Warning Timeline Summary by Season</span>
                         </div>
-                        
-                        <div class="summary-card-container">
-                            <div class="summary-card" style="border-left: 8px solid #1f77b4;">
-                                <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 1: Attention (Blue)</div>
-                                <div style="font-size: 28px; color: #1f77b4; font-weight: 800; letter-spacing: 0.5px;">{d_blue}</div>
-                            </div>
-                            <div class="summary-card" style="border-left: 8px solid #ff7f0e;">
-                                <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 2: Caution (Orange)</div>
-                                <div style="font-size: 28px; color: #ff7f0e; font-weight: 800; letter-spacing: 0.5px;">{d_orange}</div>
-                            </div>
-                            <div class="summary-card" style="border-left: 8px solid #d62728;">
-                                <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 3: Alert (Red)</div>
-                                <div style="font-size: 28px; color: #d62728; font-weight: 800; letter-spacing: 0.5px;">{d_red}</div>
-                            </div>
-                        </div>
+                        {''.join(season_summary_blocks)}
                         """, unsafe_allow_html=True)
-                       
+
                         st.divider()
 
-                except Exception as e:
-                    st.error(f"Error during data slicing/prediction: {e}")
+            except Exception as e:
+                st.error(f"Error during data slicing/prediction: {e}")
             
-            status.update(label="Analysis Process Completed.", state="complete", expanded=False)
+            status.update(label="Analysis Complete", state="complete", expanded=False)
         except Exception as e:
-            status.update(label="Error occurred during analysis!", state="error", expanded=True)
+            status.update(label="Analysis Error", state="error", expanded=True)
             st.error(f"Details: {e}")
             st.exception(e)
 
@@ -611,54 +826,13 @@ with tab2:
             <span style="font-size: 22px;"><strong>Real-Time Surveillance Results</strong></span><br>
             <span style="font-size: 16px; color: #444; line-height: 1.6;">
                 <ul style="margin-top: 10px;">
-                    <li>As new data arrives week by week, we <strong>monitor in real-time</strong> how the probability of an epidemic outbreak evolves.</li>
-                    <li>The <strong>probability of reaching risk</strong> is defined as the probability that a sliding window sample is assigned to a high-risk cluster.</li>
+                    <li>After the fitting period ends, the dashboard <strong>starts simulation immediately</strong> and tracks each season prospectively.</li>
+                    <li>The secondary axis shows the <strong>cumulative number of bootstrap models</strong> that have already produced their first seasonal warning by each date.</li>
+                    <li>An official seasonal alert is triggered when the cumulative share reaches <strong>10% or more</strong>, and each season can alert only once.</li>
+                    <li>If a season already triggered an alert during fitting, its simulation segment is shown as a <strong>gray-shaded block</strong> and no additional alert is issued.</li>
                     <li><strong>Interactive View:</strong> Use the <b>range slider</b> at the bottom of the chart to zoom into specific periods.</li>
                     <li><strong>Summary Cards:</strong> The cards below indicate the exact dates when each risk level (Attention, Caution, Alert) was first detected by the ensemble model.</li>
                 </ul>
             </span>
         </div>
         """, unsafe_allow_html=True)
-
-# with tab3:
-#     st.markdown("### Detailed Paper")
-#     # 기존 HTML 블록 100% 유지
-#     st.markdown("""
-#     <div style="background-color: #ffffff; padding: 25px; border: 1px solid #ddd; border-radius: 10px; font-size: 18px; line-height: 1.8;">
-#         <div style="background-color: #e8f4f8; padding: 15px; border-radius: 8px; margin-bottom: 25px; border-left: 5px solid #2e86c1;">
-#             <strong> Default Data Notice:</strong><br>
-#             If no Excel file is uploaded, the system automatically loads the internal 
-#             <strong>South Korea Influenza Surveillance Data (KDCA)</strong>.
-#         </div>
-#         <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px; margin-top: 0;">1. Data Input</h3>
-#         <ul style="margin-bottom: 30px;">
-#             <li><strong>Target Column:</strong> The column representing patient counts.<br>
-#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-#              Default: <b>ILI</b> (Influenza-like Illness)</span></li>
-#             <li><strong>Date Column:</strong> The column containing date information (YYYY-MM-DD).<br>
-#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-#              Default: Automatically detected (e.g., <b>date</b>, <b>일자</b>)</span></li>
-#         </ul>
-#         <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px;">2. Period Settings</h3>
-#         <ul style="margin-bottom: 30px;">
-#             <li><strong>Start Date:</strong> The beginning date for the entire analysis period.<br>
-#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-#              Default: <b>2017-01-01</b></span></li>
-#             <li><strong>Train End Date:</strong> The cutoff date for the training dataset.<br>
-#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-#              Default: <b>2024-09-15</b></span></li>
-#             <li><strong>Test End Date:</strong> The end date for the prediction simulation.<br>
-#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-#              Default: <b>Latest Date</b> available in data</span></li>
-#         </ul>
-#         <h3 style="color: #2e86c1; border-bottom: 2px solid #2e86c1; padding-bottom: 10px;">3. Algorithm Parameters</h3>
-#         <ul>
-#             <li><strong>Window Size:</strong> The number of weeks used to group data for trend analysis.<br>
-#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-#              Default: <b>12 Weeks</b></span></li>
-#             <li><strong>Bootstrap Iterations:</strong> The number of resampling iterations for the ensemble model.<br>
-#             <span style="color: #555; font-size: 16px; background-color: #f1f1f1; padding: 2px 8px; border-radius: 4px;">
-#              Default: <b>1000 Iterations</b> (Higher = More stable but slower)</span></li>
-#         </ul>
-#     </div>
-#     """, unsafe_allow_html=True)
