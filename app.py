@@ -40,7 +40,7 @@ def format_alert_date(date_value, fallback="Not detected"):
     return parsed.strftime('%Y-%m-%d')
 
 # Choose the sliding-window size that best aligns clustering alerts with hockey-stick breakpoints.
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def optimize_window_size(_data, epi, hockey_date, seasons, peak_start):
     sample_window_list = np.arange(3, 25)
     score_list = []
@@ -409,9 +409,7 @@ with tab2:
                 fit_end_date=fit_end_date
             )
             
-            status.update(label="Preprocessing...", state="running", expanded=True)
             hockey_date, hockey_df = hockey_stick_regression(data, target_col, HockeyStick_type, seasons)
-            status.update(label="Preprocessing...", state="running", expanded=True)
             cusum_result = cumulative_sum_hybrid(data.copy(), target_col, season_start_week=peak_start)
             data['cusum'] = cusum_result['cusum'].values
             
@@ -426,8 +424,6 @@ with tab2:
                 
             df_train, data_all_train = make_raw(proc_data, 'train', best_window, target_col)
             df_train = df_train.dropna()
-
-            status.update(label="Analyzing...", state="running", expanded=True)
 
             status.update(label="Analyzing...", state="running", expanded=True)
             
