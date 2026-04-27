@@ -66,7 +66,7 @@ def optimize_window_size(_data, epi, hockey_date, seasons, peak_start):
     return best_window, best_score
 
 st.set_page_config(
-    page_title="Epidemic Early Detection System",
+    page_title="Early Warning Dashboard",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -74,7 +74,7 @@ st.set_page_config(
 with st.sidebar:
     st.title("Settings")
     
-    st.header("1. Data Input")
+    st.header("1. Data Upload")
     uploaded_file = st.file_uploader("Upload Excel File (.xlsx)", type=["xlsx", "xls"])
     
     # Load either the uploaded file or the default local dataset.
@@ -147,19 +147,19 @@ with st.sidebar:
         default_fit_end = max_data_date
 
     fit_input_mode = st.radio(
-        "Fitting End Input Type",
+        "Training End Input Type",
         ["Date", "Year / Week"],
         horizontal=True,
         help="Choose either a calendar date or a year/week pair."
     )
 
     fit_end_date_direct = st.date_input(
-        "Fitting End Date",
+        "Training End Date",
         value=default_fit_end.to_pydatetime(),
         min_value=min_data_date.to_pydatetime(),
         max_value=max_data_date.to_pydatetime(),
         disabled=(fit_input_mode != "Date"),
-        help="At least 4 years of data are required before the fitting end date."
+        help="At least 4 years of data are required before the training end date."
     )
 
     fit_date_lookup = (
@@ -182,7 +182,7 @@ with st.sidebar:
     )
 
     fit_year = st.selectbox(
-        "Fitting End Year",
+        "Training End Year",
         available_fit_years,
         index=default_fit_year_idx,
         disabled=(fit_input_mode != "Year / Week"),
@@ -202,7 +202,7 @@ with st.sidebar:
     )
 
     fit_week = st.selectbox(
-        "Fitting End Week",
+        "Training End Week",
         available_fit_weeks,
         index=default_fit_week_idx,
         disabled=(fit_input_mode != "Year / Week"),
@@ -220,17 +220,17 @@ with st.sidebar:
             st.error("No valid date was found for the selected year/week.")
             st.stop()
         fit_end_date = pd.to_datetime(fit_candidates.max()).normalize()
-        st.caption(f"Resolved fitting end date: {fit_end_date.date()}")
+        st.caption(f"Resolved training end date: {fit_end_date.date()}")
 
-    st.markdown("---")
-    st.header("2. Optional Reference Dates")
+    # st.markdown("---")
+    # st.header("2. Reference Dates(Optional)")
 
-    reference_file = st.file_uploader(
-        "Upload Reference Date File (.xlsx)",
-        type=["xlsx", "xls"],
-        key="reference_date_file"
-    )
-
+    # reference_file = st.file_uploader(
+    #     "Upload Reference Date File (.xlsx)",
+    #     type=["xlsx", "xls"],
+    #     key="reference_date_file"
+    # )
+    reference_file = None
     reference_dates = None
     reference_label = None
 
@@ -262,28 +262,62 @@ with st.sidebar:
             st.warning("No valid dates were found in the uploaded reference date file.")
 
     st.markdown("---")
-    st.header("3. Parameters")
+    st.header("2. Parameters")
     
-    boot_num = st.number_input("Bootstrap Iterations", 50, 2000, 200, step=50, key="boot_num_input")
+    boot_num = st.number_input("Simulation times", 50, 2000, 200, step=50, key="boot_num_input")
     HockeyStick_type = "linear"
     
     st.markdown("---")
-    run_btn = st.button("Start Analysis", type="primary")
+    run_btn = st.button("Run Analysis", type="primary")
 
-st.title("Universal Respiratory Epidemic Early Detection System")
+st.title("Early Warning Dashboard for Seasonal Outbreaks")
 
 st.markdown("""
-<div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; margin-bottom: 25px; font-size: 18px; line-height: 1.6;">
-    <strong style="font-size: 22px;">[System Description]</strong><br>
-    This dashboard is designed for the early detection of infectious diseases.<br>
-    Please upload your data in the sidebar on the left, configure the settings below, and click <strong>'Start Analysis'</strong>.<br><br>
-    <em>For detailed instructions on the settings, please refer to <strong>Tab 1</strong> below.</em>
+<div style="padding: 18px 22px; margin-bottom: 12px; font-size: 18px; line-height: 1.5; color: #000000; background-color: #f0f2f6; border-radius: 10px; border-top: 1px solid #d9d9d9;">
+    <div style="font-size: 22px; font-weight: 800;">[System Description]</div>
+    <div style="font-size: 18px;">
+        This dashboard analyzes seasonal disease data to detect early signs of outbreak activity.<br>
+        It helps you:<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;- Identify when outbreak activity begins<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;- Track changes in disease patterns<br>
+    </div>
+    <br>
+    <div style="font-size: 22px; font-weight: 800;">[Analysis Steps]</div>
+    <div style="font-size: 18px;">
+        Upload Data &rarr; Configure Settings &rarr; Run Analysis &rarr; View Results<br>
+        Upload your data and click <strong>Run Analysis</strong> to get started.
+    </div>
+    <div style="margin-top: 18px; font-size: 18px; font-style: italic;">
+        For detailed setup instructions, refer to the <strong>'Setup Guide'</strong> tab below
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["Manual & Settings Guide", "Dashboard Analysis"])
+st.markdown("""
+<style>
+button[data-baseweb="tab"] {
+    padding-top: 0.85rem !important;
+    padding-bottom: 0.85rem !important;
+}
+button[data-baseweb="tab"] > div[data-testid="stMarkdownContainer"] > p {
+    font-size: 1.7rem !important;
+    font-weight: 800 !important;
+    line-height: 1.2 !important;
+}
+button[data-baseweb="tab"][aria-selected="true"] > div[data-testid="stMarkdownContainer"] > p {
+    font-size: 1.75rem !important;
+    font-weight: 800 !important;
+}
+[data-testid="stTabs"] button[data-baseweb="tab"] {
+    padding-top: 0.75rem !important;
+    padding-bottom: 0.75rem !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+tab1, tab2 = st.tabs(["Setup Guide", "Run Analysis"])
 with tab1:
-    st.markdown("<h2 style='font-size: 32px; font-weight: 800; color: #2c3e50; margin-bottom: 20px;'>Dashboard Guide & Setup</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='font-size: 32px; font-weight: 800; color: #2c3e50; margin-bottom: 20px;'>Getting Started & Setup</h2>", unsafe_allow_html=True)
     st.markdown("""
     <style>
     div[data-testid="stExpander"] details summary p,
@@ -292,27 +326,9 @@ with tab1:
     [data-testid="stExpander"] summary span {
         font-size: 24px !important; 
         font-weight: 800 !important;
-        color: #2c3e50 !important; /* 대제목과 어울리는 진한 남색 */
+        color: #2c3e50 !important; /* Dark navy tone that matches the main heading */
     }
-    /* 옆에 있는 꺾쇠(화살표) 아이콘도 글자 크기에 맞춰 살짝 키워줍니다 */
-    [data-testid="stExpander"] summary svg {
-        width: 24px !important;
-        height: 24px !important;
-        color: #2c3e50 !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-with tab1:
-    st.markdown("""
-    <style>
-    div[data-testid="stExpander"] details summary p,
-    div[data-testid="stExpander"] details summary span,
-    [data-testid="stExpander"] summary p,
-    [data-testid="stExpander"] summary span {
-        font-size: 24px !important; 
-        font-weight: 800 !important;
-        color: #2c3e50 !important;
-    }
+    /* Slightly enlarge the chevron icon to match the heading text size */
     [data-testid="stExpander"] summary svg {
         width: 24px !important;
         height: 24px !important;
@@ -321,7 +337,7 @@ with tab1:
     </style>
     """, unsafe_allow_html=True)
     with st.expander("0. Introduction", expanded=True):
-        col1, col2 = st.columns([0.5, 2.5], gap="large")
+        col1, col2 = st.columns([0.7, 2.3], gap="large")
         
         with col1:
             import os
@@ -333,17 +349,51 @@ with tab1:
             try:
                 with open(img_path, "rb") as image_file:
                     encoded_string = base64.b64encode(image_file.read()).decode()
-                st.markdown(f'<div style="text-align: center; margin-top: 5px; margin-bottom: 40px;"><img src="data:image/png;base64,{encoded_string}" width="200" style="border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"></div>', unsafe_allow_html=True)
+                st.markdown(f"""
+                <div style="
+                    min-height: 500px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 5px 0 40px 0;
+                ">
+                    <img src="data:image/png;base64,{encoded_string}" style="
+                        max-width: 88%;
+                        max-height: 360px;
+                        object-fit: contain;
+                        border-radius: 8px;
+                        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                    ">
+                </div>
+                """, unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"Image load error: {e}")
 
         with col2:
             st.markdown("""
-            <div style="border-left: 5px solid #1f77b4; background-color: #f8fbff; padding: 20px 25px; border-radius: 0 8px 8px 0; margin-top: 5px; margin-bottom: 40px;">
-                <div style="color: #333; line-height: 1.8;">
-                    <p style="font-size: 22px; font-weight: 500; margin-bottom: 15px;">This dashboard is a tool that defines when an outbreak started using seasonal infectious disease data, and uses this to determine when the next outbreak will occur during an ongoing season.</p>
-                    <p style="font-size: 22px; font-weight: 500; margin-bottom: 15px;">A 'season' is defined from the start to the end of a single outbreak wave, and the dashboard is equipped with an algorithm to detect this automatically.</p>
-                    <p style="font-size: 22px; font-weight: 500; margin-bottom: 0;">Therefore, the real-time detection period can only be verified for the final, ongoing season.</p>
+            <div style="min-height: 500px; border-left: 5px solid #1f77b4; background-color: #f8fbff; padding: 20px 25px; border-radius: 0 8px 8px 0; margin-top: 5px; margin-bottom: 40px; display: flex; flex-direction: column; justify-content: center;">
+                <div style="color: #000000; line-height: 1.6; font-size: 20px;">
+                    <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px;">
+                        What this dashboard does
+                    </div>
+                    <div style="margin-left: 18px; margin-bottom: 26px;">
+                        - Detects early outbreak signals from seasonal disease data<br>
+                        - Identifies when outbreak activity begins within a season
+                    </div>
+                    <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px;">
+                        How the analysis works
+                    </div>
+                    <div style="margin-left: 18px; margin-bottom: 26px;">
+                        - The selected period is used to learn the baseline pattern of the disease. <strong>At least 4 years</strong> of data are required, and <strong>6 years</strong> or more are recommended<br>
+                        - Outbreak signals are detected after this period, using latest available data<br>
+                    </div>
+                    <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px;">
+                        How to set it up
+                    </div>
+                    <div style="margin-left: 18px;">
+                        - Set the training period in the left panel using <strong>End Date</strong> or <strong>Year & Week</strong><br>
+                        - Upload your data, configure the settings, and click <strong>Run Analysis</strong>
+                    </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -399,7 +449,7 @@ with tab2:
             
             fit_end_date = pd.to_datetime(fit_end_date)
             if fit_end_date < (proc_data['Date'].min() + pd.DateOffset(years=4)):
-                st.error("Fitting End Date must be at least 4 years after the first available date.")
+                st.error("Training End Date must be at least 4 years after the first available date.")
                 st.stop()
 
             data, period_meta = assign_analysis_periods(
@@ -586,7 +636,7 @@ with tab2:
                     <div class="period-card-title">Real-time Monitoring</div>
                     <div class="period-card-main">{realtime_period_text}</div>
                     <div class="period-card-label">Simulation range</div>
-                    <div class="period-card-detail">Simulation starts immediately after the selected fitting end date and proceeds season by season.</div>
+                    <div class="period-card-detail">Simulation starts immediately after the selected training end date and proceeds season by season.</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -634,7 +684,7 @@ with tab2:
             st.markdown('<span id="fitting-period-analysis" class="report-anchor"></span>', unsafe_allow_html=True)
             st.subheader("2. Bootstrap Early Warning Detection")
             
-            # 새로운 시각화 함수 적용
+            # Apply the updated visualization function
             fig1 = early_warning_visualization_bootstrap(
                 proc_data, data_all_train, target_col, other_dates, hockey_date, date_df, best_window
             )
@@ -767,7 +817,6 @@ with tab2:
                                     <div style="font-size: 28px; color: #d62728; font-weight: 800; letter-spacing: 0.5px;">{d_red}</div>
                                 </div>
                             </div>
-                            {"<div style='font-size: 13px; color: #6b7280; margin-top: -8px;'>Simulation is gray-shaded because this season already triggered a red alert during fitting.</div>" if season_suppressed else ""}
                         </div>
                         """)
 
