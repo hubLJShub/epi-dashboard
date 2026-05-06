@@ -215,7 +215,36 @@ def filter_data(data, seasons, start_week=24):
 
     return df
 
-def assign_retrospective_period(data, seasons, start_week, season_starts=None):
+def extend_standard_seasons_with_leading_history(data, detected_seasons, start_week, epi, season_results):
+    if not detected_seasons:
+        return []
+
+    threshold_values = pd.to_numeric(season_results.get('threshold'), errors='coerce').dropna()
+    if threshold_values.empty:
+        return sorted({int(season) for season in detected_seasons})
+
+    leading_threshold = threshold_values.mean()
+    df = data.copy().sort_values('Date').reset_index(drop=True)
+    df['Season'] = np.where(df['Week'] >= start_week, df['Year'], df['Year'] - 1)
+
+    detected_set = {int(season) for season in detected_seasons}
+    first_detected_season = min(detected_set)
+    leading_candidates = sorted(
+        int(season)
+        for season in df.loc[df['Season'] < first_detected_season, 'Season'].dropna().unique()
+    )
+
+    leading_valid_seasons = []
+    for season in leading_candidates:
+        season_data = df[df['Season'] == season]
+        if season_data.empty:
+            continue
+        if (season_data[epi] > leading_threshold).any():
+            leading_valid_seasons.append(season)
+
+    return sorted(set(leading_valid_seasons).union(detected_set))
+
+def assign_retrospective_period(data, seasons=None, start_week=24, season_starts=None):
     df = data.copy()
     df = df.sort_values('Date').reset_index(drop=True)
 
@@ -235,7 +264,8 @@ def assign_retrospective_period(data, seasons, start_week, season_starts=None):
     else:
         df['Season'] = np.where(df['Week'] >= start_week, df['Year'], df['Year'] - 1)
 
-    df = df[df['Season'].isin(seasons)].copy()
+    if seasons is not None:
+        df = df[df['Season'].isin(seasons)].copy()
     df = df.sort_values('Date').reset_index(drop=True)
     df['set'] = 'analysis'
 
@@ -243,16 +273,21 @@ def assign_retrospective_period(data, seasons, start_week, season_starts=None):
     season_counts = df.groupby('Season')[count_col].nunique()
     complete_seasons = season_counts[season_counts >= 52].index.tolist()
     incomplete_seasons = season_counts[season_counts < 52].index.tolist()
+    analysis_seasons = sorted(df['Season'].unique().tolist())
+    warmup_seasons = []
+    if analysis_seasons and analysis_seasons[0] in incomplete_seasons:
+        warmup_seasons = [analysis_seasons[0]]
 
     complete_seasons_for_window = complete_seasons
 
     meta = {
         'analysis_start': df['Date'].min(),
         'analysis_end': df['Date'].max(),
-        'analysis_seasons': sorted(df['Season'].unique().tolist()),
+        'analysis_seasons': analysis_seasons,
         'complete_seasons': sorted(complete_seasons),
         'incomplete_seasons': sorted(incomplete_seasons),
         'window_eval_seasons': sorted(complete_seasons_for_window),
+        'warmup_seasons': warmup_seasons,
     }
 
     return df.reset_index(drop=True), meta
@@ -412,7 +447,7 @@ def hockey_stick_regression(data, epi, HockeyStick_type, years):
         info_by_year[yr] = (d, info)
     hockey_peak_df = pd.DataFrame(rows)
 
-    break_dates = []
+    break_dates_by_season = {}
 
     for index, row in hockey_peak_df.iterrows():
         year = row['hockey_break_year']
@@ -420,6 +455,8 @@ def hockey_stick_regression(data, epi, HockeyStick_type, years):
         
         match = data[(data['Year'] == year) & (data['Week'] == week)]['Date']
         if not match.empty:
-            break_dates.append(pd.to_datetime(match.values[0]))
-            
+            break_dates_by_season[int(row['Season'])] = pd.to_datetime(match.values[0])
+
+    break_dates = [break_dates_by_season.get(int(year), pd.NaT) for year in years]
+
     return break_dates, hockey_peak_df
