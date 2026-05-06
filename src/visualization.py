@@ -398,7 +398,7 @@ def _build_bootstrap_detection_timeline(
     fitting_end_date=None,
     split_labels=False,
     show_blue_band=True,
-    show_season_boundaries=True,
+    show_season_boundaries=False,
 ):
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     x = data['Date']
@@ -417,17 +417,7 @@ def _build_bootstrap_detection_timeline(
         secondary_y=False,
     )
 
-    if show_season_boundaries:
-        season_boundaries = data.groupby('Season')['Date'].min().sort_values()
-        for season_start in season_boundaries:
-            fig.add_vline(
-                x=season_start,
-                line_color='#ec4899',
-                line_width=4,
-                opacity=0.35
-            )
-
-    if pd.notnull(fitting_end_date):
+    if fitting_end_date is not None and pd.notnull(fitting_end_date):
         fig.add_vline(
             x=fitting_end_date,
             line_color='#7c3aed',
@@ -483,33 +473,6 @@ def _build_bootstrap_detection_timeline(
                     line=dict(color=color, dash=dash, width=2)
                 )
 
-    for i, date in enumerate(pd.to_datetime(hockey_dates, errors='coerce')):
-        if pd.isna(date):
-            continue
-        if date < x.min() or date > x.max():
-            continue
-        fig.add_trace(
-            go.Scatter(
-                x=[date],
-                y=[max_y * 1.16],
-                mode='markers',
-                marker=dict(color='green', symbol='diamond', size=10),
-                name='Hockey',
-                showlegend=(i == 0),
-                hoverinfo='name+x'
-            ),
-            secondary_y=False,
-        )
-        fig.add_shape(
-            type='line',
-            x0=date,
-            x1=date,
-            y0=0,
-            y1=top_line_y,
-            line=dict(color='green', dash='dash', width=2),
-            opacity=0.7
-        )
-
     max_count = 0
     legend_seen = set()
     season_columns = sorted(date_df.columns) if len(date_df.columns) > 0 else []
@@ -564,7 +527,7 @@ def _build_bootstrap_detection_timeline(
     y_max_limit = max_y * (1.6 if other_dates is not None else 1.32)
     fig.update_layout(
         xaxis=dict(
-            range=[x.min() - pd.Timedelta(weeks=sample_window-1), x.max()],
+            range=[x.min(), x.max()],
             rangeslider=dict(visible=True, thickness=0.15, bgcolor="#EAEAEA"),
             type="date"
         ),
@@ -589,69 +552,64 @@ def _build_bootstrap_detection_timeline(
     )
     return fig
 
-# Render the fitting-period bootstrap result using the same overall layout as the real-time chart.
+# Render the retrospective bootstrap result across the full analysis period.
 def early_warning_visualization_bootstrap(data, data_all, epi, other_dates, Hockey_date, date_df, sample_window):
     if epi != 'ILI':
         other_dates = None
 
-    train_seasons = [int(col) for col in date_df.columns] if len(date_df.columns) > 0 else []
-    train_data = data[data['Season'].isin(train_seasons)].reset_index(drop=True)
-    fitting_end_date = train_data.loc[train_data['set'] == 'train', 'Date'].max()
+    analysis_data = data.reset_index(drop=True)
 
     return _build_bootstrap_detection_timeline(
-        data=train_data,
+        data=analysis_data,
         epi=epi,
         other_dates=other_dates,
-        hockey_dates=Hockey_date,
+        hockey_dates=[],
         date_df=date_df,
         sample_window=sample_window,
-        fitting_end_date=fitting_end_date,
+        fitting_end_date=None,
         split_labels=False,
         show_blue_band=True,
-        show_season_boundaries=True,
+        show_season_boundaries=False,
     )
 
-# Render the full timeline as context, highlighting fitting and simulation periods.
-def overall_period_visualization_bootstrap(data, epi, other_dates, Hockey_date, date_df, sample_window, fitting_end_date):
+# Render the full retrospective timeline.
+def overall_period_visualization_bootstrap(data, epi, other_dates, Hockey_date, date_df, sample_window, fitting_end_date=None):
     data = data.sort_values('Date').reset_index(drop=True)
     fig = go.Figure()
+    max_y = data[epi].max()
 
     fig.add_trace(
         go.Bar(
             x=data['Date'],
             y=data[epi],
-            name=f"{epi} Patients",
+            name=f"{epi} Signal",
             marker_color='gray',
             opacity=0.35,
         )
     )
 
-    fit_start = data['Date'].min()
-    fit_end = pd.to_datetime(fitting_end_date)
-    sim_dates = data.loc[data['set'] == 'test', 'Date'] if 'set' in data.columns else pd.Series(dtype='datetime64[ns]')
-    sim_start = pd.to_datetime(sim_dates.min()) if not sim_dates.empty else None
-    sim_end = data['Date'].max()
-
-    fig.add_vrect(
-        x0=fit_start,
-        x1=fit_end,
-        fillcolor='#60a5fa',
-        opacity=0.18,
-        line_width=0,
-        annotation_text='Fitting',
-        annotation_position='top left'
-    )
-
-    if pd.notnull(sim_start):
-        fig.add_vrect(
-            x0=sim_start,
-            x1=sim_end,
-            fillcolor='#f87171',
-            opacity=0.16,
-            line_width=0,
-            annotation_text='Simulation',
-            annotation_position='top left'
-        )
+    if other_dates is not None:
+        ref_colors = ['#ef4444', '#f97316', '#a855f7']
+        ref_markers = ['star', 'triangle-up', 'diamond']
+        for j, (key, dates) in enumerate(other_dates.items()):
+            color = ref_colors[j % len(ref_colors)]
+            marker = ref_markers[j % len(ref_markers)]
+            for i, date in enumerate(pd.to_datetime(dates, errors='coerce')):
+                if pd.isna(date):
+                    continue
+                if date < data['Date'].min() or date > data['Date'].max():
+                    continue
+                fig.add_trace(
+                    go.Scatter(
+                        x=[date],
+                        y=[max_y * (1.16 + 0.08 * j)],
+                        mode='markers',
+                        marker=dict(color=color, symbol=marker, size=10),
+                        name=key,
+                        showlegend=(i == 0),
+                        hoverinfo='name+x'
+                    )
+                )
 
     fig.update_layout(
         xaxis=dict(
@@ -659,6 +617,7 @@ def overall_period_visualization_bootstrap(data, epi, other_dates, Hockey_date, 
             rangeslider=dict(visible=True, thickness=0.15, bgcolor="#EAEAEA"),
             type="date"
         ),
+        yaxis=dict(range=[0, max_y * (1.32 if other_dates is not None else 1.15)]),
         hovermode="x unified",
         legend=dict(
             orientation="h",
@@ -670,9 +629,9 @@ def overall_period_visualization_bootstrap(data, epi, other_dates, Hockey_date, 
         plot_bgcolor='white',
         margin=dict(l=40, r=40, t=90, b=40)
     )
-
     fig.update_yaxes(title_text=f"<b>{epi}</b>", showgrid=False)
     return fig
+
 def visualize_3d_incremental_detection_weekly(iteration_results):
     fig = plt.figure(figsize=(15, 10))
     ax = fig.add_subplot(111, projection='3d')
@@ -890,9 +849,7 @@ def interactive_real_time_chart(data_all, detection_timeline, other_dates, epi, 
                 x1=shade_end,
                 fillcolor='gray',
                 opacity=0.18,
-                line_width=0,
-                annotation_text='Shown only, not simulated',
-                annotation_position='top left'
+                line_width=0
             )
 
     level_dates = _add_cumulative_detection_overlay(fig, detection_timeline, secondary_y=True)
@@ -921,7 +878,7 @@ def interactive_real_time_chart(data_all, detection_timeline, other_dates, epi, 
 
     return fig, b_date_str, o_date_str, r_date_str
 
-# Merge season-specific real-time results into a single timeline with season boundary markers.
+# Merge season-specific real-time results into a single timeline.
 def interactive_real_time_chart_combined(season_results, epi):
     import pandas as pd
     import plotly.graph_objects as go
@@ -972,24 +929,6 @@ def interactive_real_time_chart_combined(season_results, epi):
                     opacity=0.18,
                     line_width=0
                 )
-
-        season_start = item.get('season_boundary', item['display_data']['Date'].min())
-        fig.add_vline(
-            x=season_start,
-            line_color='#ec4899',
-            line_width=4,
-            opacity=0.35
-        )
-
-        season_mid = season_start + (item['display_data']['Date'].max() - season_start) / 2
-        fig.add_annotation(
-            x=season_mid,
-            y=1.08,
-            yref='paper',
-            text=f"{int(item['season'])}-{int(item['season'])+1} Season",
-            showarrow=False,
-            font=dict(size=12, color='#9d174d')
-        )
 
     fig.update_layout(
         xaxis=dict(
