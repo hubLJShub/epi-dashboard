@@ -25,6 +25,7 @@ try:
         set_season_start_week_adaptive,
         hockey_stick_regression,
         assign_retrospective_period,
+        extend_standard_seasons_with_leading_history,
     )
 except ImportError as e:
     st.error(f"Failed to import modules from src folder.\nError: {e}")
@@ -419,7 +420,13 @@ with tab2:
             visual_peak_start, peak_len = visualization_season(proc_data, season_df, start_week=manual_start_week)
             if season_meta.get('mode') == 'standard':
                 peak_start = visual_peak_start
-                seasons = None
+                seasons = extend_standard_seasons_with_leading_history(
+                    proc_data,
+                    detected_seasons,
+                    peak_start,
+                    target_col,
+                    season_df
+                )
                 season_starts = None
             else:
                 peak_start = season_meta.get('start_week')
