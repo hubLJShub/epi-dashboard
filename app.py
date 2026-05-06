@@ -36,6 +36,21 @@ def format_alert_date(date_value, fallback="Not detected"):
         return fallback
     return parsed.strftime('%Y-%m-%d')
 
+def drop_warmup_detection_columns(date_df, warmup_seasons):
+    if date_df.empty or not warmup_seasons:
+        return date_df.copy()
+
+    warmup_set = {int(season) for season in warmup_seasons}
+    drop_cols = []
+    for col in date_df.columns:
+        try:
+            if int(col) in warmup_set:
+                drop_cols.append(col)
+        except (TypeError, ValueError):
+            continue
+
+    return date_df.drop(columns=drop_cols, errors='ignore')
+
 # Choose the sliding-window size that best aligns clustering alerts with hockey-stick breakpoints.
 @st.cache_resource(show_spinner=False)
 def optimize_window_size(_data, epi, hockey_dates, eval_seasons, peak_start):
@@ -400,21 +415,25 @@ with tab2:
                 st.error("No valid seasons were detected from the selected data.")
                 st.stop()
 
-            seasons = season_df['season'].to_list()
+            detected_seasons = season_df['season'].to_list()
             visual_peak_start, peak_len = visualization_season(proc_data, season_df, start_week=manual_start_week)
             if season_meta.get('mode') == 'standard':
                 peak_start = visual_peak_start
+                seasons = None
+                season_starts = None
             else:
                 peak_start = season_meta.get('start_week')
                 if peak_start is None:
                     st.error("No valid short-history season start week was detected.")
                     st.stop()
+                seasons = detected_seasons
+                season_starts = season_df
 
             data, period_meta = assign_retrospective_period(
                 proc_data,
                 seasons,
                 start_week=peak_start,
-                season_starts=season_df if season_meta.get('mode') != 'standard' else None
+                season_starts=season_starts
             )
             window_eval_seasons = period_meta['window_eval_seasons']
             if window_eval_seasons:
@@ -478,10 +497,12 @@ with tab2:
                 peak_start,
                 ED_date
             )
+            warmup_seasons = period_meta.get('warmup_seasons', [])
+            date_df_display = drop_warmup_detection_columns(date_df, warmup_seasons)
 
             season_summary_blocks = []
-            for season in date_df.columns:
-                _, summary = summarize_detection_progression(date_df[season])
+            for season in date_df_display.columns:
+                _, summary = summarize_detection_progression(date_df_display[season])
                 d_blue = format_alert_date(summary.get('blue_date'))
                 d_orange = format_alert_date(summary.get('orange_date'))
                 d_red = format_alert_date(summary.get('red_date'))
@@ -519,6 +540,12 @@ with tab2:
                 f"{len(window_eval_seasons)} complete seasons used for window optimization "
                 f"({season_meta.get('mode', 'standard')} mode)"
             )
+            warmup_text = ""
+            if warmup_seasons:
+                warmup_text = (
+                    f"{len(warmup_seasons)} leading incomplete season "
+                    "is used for modeling context but hidden from detection markers."
+                )
 
             st.markdown("""
             <style>
@@ -626,14 +653,15 @@ with tab2:
                     <div class="period-card-label">Retrospective range</div>
                     <div class="period-card-detail">The full available period is used to learn a stable signal pattern.</div>
                 </div>
-                <div class="period-card">
-                    <div class="period-card-title">Window Calibration</div>
-                    <div class="period-card-main">{best_window} Weeks</div>
-                    <div class="period-card-label">Selected window size</div>
-                    <div class="period-card-detail">{season_count_text}</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+	                <div class="period-card">
+	                    <div class="period-card-title">Window Calibration</div>
+	                    <div class="period-card-main">{best_window} Weeks</div>
+	                    <div class="period-card-label">Selected window size</div>
+	                    <div class="period-card-detail">{season_count_text}</div>
+	                    <div class="period-card-note">{warmup_text}</div>
+	                </div>
+	            </div>
+	            """, unsafe_allow_html=True)
 
             st.markdown("""
             <div class="report-nav">
@@ -654,7 +682,7 @@ with tab2:
                 target_col,
                 other_dates,
                 hockey_date,
-                date_df,
+                date_df_display,
                 best_window
             )
             st.plotly_chart(fig_overall, use_container_width=True)
@@ -676,7 +704,7 @@ with tab2:
             st.subheader("2. Retrospective Bootstrap Early Warning Detection")
 
             fig1 = early_warning_visualization_bootstrap(
-                proc_data, data_all_analysis, target_col, other_dates, hockey_date, date_df, best_window
+                proc_data, data_all_analysis, target_col, other_dates, hockey_date, date_df_display, best_window
             )
             st.plotly_chart(fig1, use_container_width=True)
 
@@ -726,12 +754,12 @@ with tab2:
             <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #2e86c1; margin-bottom: 20px;">
                 <span style="font-size: 22px;"><strong>Retrospective Analysis Results</strong></span><br>
                 <span style="font-size: 16px; color: #444; line-height: 1.6;">
-                    <ul style="margin-top: 10px;">
-                        <li>The full available period is used together for model fitting and retrospective signal detection.</li>
-                        <li>The sliding-window size is selected by comparing bootstrap warning dates with hockey-stick reference dates from complete seasons only.</li>
-                        <li>The final incomplete season is retained in the retrospective chart, but excluded from window-size calibration.</li>
-                        <li><strong>Interactive View:</strong> Use the <b>range slider</b> at the bottom of the chart to zoom into specific periods.</li>
-                    </ul>
+	                    <ul style="margin-top: 10px;">
+	                        <li>The full available period is used together for model fitting and retrospective signal detection.</li>
+	                        <li>The sliding-window size is selected by comparing bootstrap warning dates with hockey-stick reference dates from complete seasons only.</li>
+	                        <li>Incomplete seasons remain visible in the chart, but the leading incomplete season is treated as a warm-up period and hidden from detection markers.</li>
+	                        <li><strong>Interactive View:</strong> Use the <b>range slider</b> at the bottom of the chart to zoom into specific periods.</li>
+	                    </ul>
                 </span>
             </div>
             """, unsafe_allow_html=True)
