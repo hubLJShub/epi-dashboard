@@ -7,27 +7,24 @@ from pathlib import Path
 # Import the modules used across preprocessing, modeling, and visualization.
 try:
     from config import Config
-    from src.preprocessing import make_raw, cumulative_sum_hybrid
+    from src.preprocessing import make_raw, cumulative_sum_adaptive
     from src.clustering import (
         K_means_clustering, 
+        extract_seasonal_detection_dates,
         find_warning_periods,
         train_bootstrap_ensemble, 
         analyze_train_distribution,
-        analyze_distribution_with_bootstrap,
-        predict_new_data_probability,
         summarize_detection_progression
     )
     from src.visualization import (
         early_warning_visualization_bootstrap, 
         overall_period_visualization_bootstrap,
         visualization_season,
-        interactive_real_time_chart,
-        interactive_real_time_chart_combined
     )
     from src.season_setting import (
-        set_season_start_week,
+        set_season_start_week_adaptive,
         hockey_stick_regression,
-        assign_analysis_periods,
+        assign_retrospective_period,
     )
 except ImportError as e:
     st.error(f"Failed to import modules from src folder.\nError: {e}")
@@ -41,22 +38,57 @@ def format_alert_date(date_value, fallback="Not detected"):
 
 # Choose the sliding-window size that best aligns clustering alerts with hockey-stick breakpoints.
 @st.cache_resource(show_spinner=False)
-def optimize_window_size(_data, epi, hockey_date, seasons, peak_start):
+def optimize_window_size(_data, epi, hockey_dates, eval_seasons, peak_start):
     sample_window_list = np.arange(3, 25)
     score_list = []
     best_score = np.inf
+    eval_seasons = [int(season) for season in eval_seasons]
+    hockey_by_season = {
+        int(season): pd.to_datetime(date).normalize()
+        for season, date in zip(eval_seasons, hockey_dates)
+        if pd.notna(pd.to_datetime(date, errors='coerce'))
+    }
+
+    if not hockey_by_season:
+        return int(sample_window_list[0]), np.inf
     
     for sample_window in sample_window_list:
-        df_train, data_all_train = make_raw(_data, 'train', sample_window, epi)
-        result_data_t, kmeans, _, _ = K_means_clustering(df_train)
-        warning_label_t = result_data_t['label'].max()
-        ED_date = find_warning_periods(result_data_t, data_all_train, peak_start, warning_label_t)
-        
-        if len(ED_date) != (len(hockey_date) - 1):
+        df_analysis, data_all_analysis = make_raw(_data, 'analysis', sample_window, epi)
+        feature_cols = ['slope', 'mean', 'CS_mean']
+        valid_mask = df_analysis[feature_cols].notna().all(axis=1)
+        df_analysis = df_analysis.loc[valid_mask].reset_index(drop=True)
+        data_all_analysis = data_all_analysis.loc[valid_mask].reset_index(drop=True)
+
+        if df_analysis.empty or data_all_analysis.empty:
             score = 1000
         else:
-            diff = (pd.Series(hockey_date) - pd.Series(ED_date)).dt.days
-            score = diff.abs().sum(skipna=True)
+            try:
+                result_data_t, _, _, _ = K_means_clustering(df_analysis)
+                warning_label_t = result_data_t['label'].max()
+                seasonal_dates = extract_seasonal_detection_dates(
+                    result_data_t,
+                    data_all_analysis,
+                    warning_label=warning_label_t
+                )
+                detected_by_season = {
+                    int(season): pd.to_datetime(detect_date).normalize()
+                    for season, detect_date in seasonal_dates[['Season', 'detect_date']].itertuples(index=False)
+                }
+                compared_seasons = [
+                    season for season in eval_seasons
+                    if season in hockey_by_season and season in detected_by_season
+                ]
+                missing_count = len(hockey_by_season) - len(compared_seasons)
+
+                if not compared_seasons:
+                    score = 1000
+                else:
+                    hockey_series = pd.Series([hockey_by_season[season] for season in compared_seasons])
+                    detected_series = pd.Series([detected_by_season[season] for season in compared_seasons])
+                    diff = (hockey_series - detected_series).dt.days
+                    score = diff.abs().sum(skipna=True) + (missing_count * 1000)
+            except Exception:
+                score = 1000
             
         if score < best_score:
             best_score = score
@@ -139,89 +171,6 @@ with st.sidebar:
         st.stop()
     manual_start_week = 1
 
-    # Require at least four years of data before the fitting end date.
-    min_data_date = raw_data[date_col].min().normalize()
-    default_fit_end = min_data_date + pd.DateOffset(years=4)
-    max_data_date = raw_data[date_col].max().normalize()
-    if default_fit_end > max_data_date:
-        default_fit_end = max_data_date
-
-    fit_input_mode = st.radio(
-        "Training End Input Type",
-        ["Date", "Year / Week"],
-        horizontal=True,
-        help="Choose either a calendar date or a year/week pair."
-    )
-
-    fit_end_date_direct = st.date_input(
-        "Training End Date",
-        value=default_fit_end.to_pydatetime(),
-        min_value=min_data_date.to_pydatetime(),
-        max_value=max_data_date.to_pydatetime(),
-        disabled=(fit_input_mode != "Date"),
-        help="At least 4 years of data are required before the training end date."
-    )
-
-    fit_date_lookup = (
-        raw_data[[date_col]]
-        .assign(
-            FitYear=raw_data[date_col].dt.year.astype(int),
-            FitWeek=raw_data[date_col].dt.isocalendar().week.astype(int)
-        )
-        .drop_duplicates()
-        .sort_values(date_col)
-        .reset_index(drop=True)
-    )
-
-    available_fit_years = fit_date_lookup["FitYear"].drop_duplicates().tolist()
-    default_fit_year = int(default_fit_end.year)
-    default_fit_year_idx = (
-        available_fit_years.index(default_fit_year)
-        if default_fit_year in available_fit_years
-        else max(0, len(available_fit_years) - 1)
-    )
-
-    fit_year = st.selectbox(
-        "Training End Year",
-        available_fit_years,
-        index=default_fit_year_idx,
-        disabled=(fit_input_mode != "Year / Week"),
-    )
-
-    available_fit_weeks = (
-        fit_date_lookup.loc[fit_date_lookup["FitYear"] == fit_year, "FitWeek"]
-        .drop_duplicates()
-        .sort_values()
-        .tolist()
-    )
-    default_fit_week = int(default_fit_end.isocalendar().week)
-    default_fit_week_idx = (
-        available_fit_weeks.index(default_fit_week)
-        if default_fit_week in available_fit_weeks
-        else max(0, len(available_fit_weeks) - 1)
-    )
-
-    fit_week = st.selectbox(
-        "Training End Week",
-        available_fit_weeks,
-        index=default_fit_week_idx,
-        disabled=(fit_input_mode != "Year / Week"),
-    )
-
-    if fit_input_mode == "Date":
-        fit_end_date = pd.to_datetime(fit_end_date_direct).normalize()
-    else:
-        fit_candidates = fit_date_lookup.loc[
-            (fit_date_lookup["FitYear"] == fit_year) &
-            (fit_date_lookup["FitWeek"] == fit_week),
-            date_col
-        ]
-        if fit_candidates.empty:
-            st.error("No valid date was found for the selected year/week.")
-            st.stop()
-        fit_end_date = pd.to_datetime(fit_candidates.max()).normalize()
-        st.caption(f"Resolved training end date: {fit_end_date.date()}")
-
     # st.markdown("---")
     # st.header("2. Reference Dates(Optional)")
 
@@ -264,27 +213,27 @@ with st.sidebar:
     st.markdown("---")
     st.header("2. Parameters")
     
-    boot_num = st.number_input("Simulation times", 50, 2000, 200, step=50, key="boot_num_input")
+    boot_num = st.number_input("Repeat Runs", 50, 2000, 200, step=50, key="boot_num_input")
     HockeyStick_type = "linear"
     
     st.markdown("---")
     run_btn = st.button("Run Analysis", type="primary")
 
-st.title("Early Warning Dashboard for Seasonal Outbreaks")
+st.title("Early Warning Dashboard for Seasonal Signals")
 
 st.markdown("""
 <div style="padding: 18px 22px; margin-bottom: 12px; font-size: 18px; line-height: 1.5; color: #000000; background-color: #f0f2f6; border-radius: 10px; border-top: 1px solid #d9d9d9;">
     <div style="font-size: 22px; font-weight: 800;">[System Description]</div>
     <div style="font-size: 18px;">
-        This dashboard analyzes seasonal disease data to detect early signs of outbreak activity.<br>
+        This dashboard analyzes seasonal time-series data to detect early warning signals.<br>
         It helps you:<br>
-        &nbsp;&nbsp;&nbsp;&nbsp;- Identify when outbreak activity begins<br>
-        &nbsp;&nbsp;&nbsp;&nbsp;- Track changes in disease patterns<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;- Identify when seasonal signal activity begins<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;- Track changes in recurring seasonal patterns<br>
     </div>
     <br>
     <div style="font-size: 22px; font-weight: 800;">[Analysis Steps]</div>
     <div style="font-size: 18px;">
-        Upload Data &rarr; Configure Settings &rarr; Run Analysis &rarr; View Results<br>
+        Upload Data &rarr; Configure Settings &rarr; Run Analysis &rarr; View Analysis Report<br>
         Upload your data and click <strong>Run Analysis</strong> to get started.
     </div>
     <div style="margin-top: 18px; font-size: 18px; font-style: italic;">
@@ -315,7 +264,7 @@ button[data-baseweb="tab"][aria-selected="true"] > div[data-testid="stMarkdownCo
 </style>
 """, unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["Setup Guide", "Run Analysis"])
+tab1, tab2 = st.tabs(["Setup Guide", "Analysis Report"])
 with tab1:
     st.markdown("<h2 style='font-size: 32px; font-weight: 800; color: #2c3e50; margin-bottom: 20px;'>Getting Started & Setup</h2>", unsafe_allow_html=True)
     st.markdown("""
@@ -377,27 +326,27 @@ with tab1:
                         What this dashboard does
                     </div>
                     <div style="margin-left: 18px; margin-bottom: 26px;">
-                        - Detects early outbreak signals from seasonal disease data<br>
-                        - Identifies when outbreak activity begins within a season
+                        - Detects early warning signals from seasonal time-series data<br>
+                        - Identifies when signal activity begins within a season
                     </div>
                     <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px;">
                         How the analysis works
                     </div>
                     <div style="margin-left: 18px; margin-bottom: 26px;">
-                        - The selected period is used to learn the baseline pattern of the disease. <strong>At least 4 years</strong> of data are required, and <strong>6 years</strong> or more are recommended<br>
-                        - Outbreak signals are detected after this period, using latest available data<br>
+                        - The full retrospective period is used to learn a stable baseline pattern<br>
+                        - <strong>At least 1 year</strong> of data is required; <strong>4 years</strong> or more uses the standard season algorithm<br>
                     </div>
                     <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px;">
                         How to set it up
                     </div>
                     <div style="margin-left: 18px;">
-                        - Set the training period in the left panel using <strong>End Date</strong> or <strong>Year & Week</strong><br>
-                        - Upload your data, configure the settings, and click <strong>Run Analysis</strong>
+                        - Upload your data, configure the settings, and click <strong>Run Analysis</strong><br>
+                        - Review retrospective signal detection results in the <strong>Analysis Report</strong>
                     </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
-    with st.expander("1. Setting Guide", expanded=False):
+    with st.expander("1. Setup Guide", expanded=False):
         import os
         import base64
         
@@ -442,25 +391,43 @@ with tab2:
             if 'Week' not in proc_data.columns:
                 proc_data['Week'] = proc_data['Date'].dt.isocalendar().week
             status.update(label="Preprocessing...", state="running", expanded=True)
-            season_df = set_season_start_week(proc_data, target_col)
-            seasons = season_df['season'].to_list()
-            
-            peak_start, peak_len = visualization_season(proc_data, season_df, start_week=manual_start_week)
-            
-            fit_end_date = pd.to_datetime(fit_end_date)
-            if fit_end_date < (proc_data['Date'].min() + pd.DateOffset(years=4)):
-                st.error("Training End Date must be at least 4 years after the first available date.")
+            season_df, season_meta = set_season_start_week_adaptive(proc_data, target_col)
+            if season_meta.get('mode') == 'insufficient':
+                st.error(season_meta.get('reason', 'At least 1 year of data is required.'))
                 st.stop()
 
-            data, period_meta = assign_analysis_periods(
+            if season_df.empty:
+                st.error("No valid seasons were detected from the selected data.")
+                st.stop()
+
+            seasons = season_df['season'].to_list()
+            visual_peak_start, peak_len = visualization_season(proc_data, season_df, start_week=manual_start_week)
+            if season_meta.get('mode') == 'standard':
+                peak_start = visual_peak_start
+            else:
+                peak_start = season_meta.get('start_week')
+                if peak_start is None:
+                    st.error("No valid short-history season start week was detected.")
+                    st.stop()
+
+            data, period_meta = assign_retrospective_period(
                 proc_data,
                 seasons,
                 start_week=peak_start,
-                fit_end_date=fit_end_date
+                season_starts=season_df if season_meta.get('mode') != 'standard' else None
             )
-            
-            hockey_date, hockey_df = hockey_stick_regression(data, target_col, HockeyStick_type, seasons)
-            cusum_result = cumulative_sum_hybrid(data.copy(), target_col, season_start_week=peak_start)
+            window_eval_seasons = period_meta['window_eval_seasons']
+            if window_eval_seasons:
+                hockey_date, hockey_df = hockey_stick_regression(data, target_col, HockeyStick_type, window_eval_seasons)
+            else:
+                hockey_date, hockey_df = [], pd.DataFrame()
+                st.warning("No complete season was available for window-size optimization. A default 12-week window was used.")
+            cusum_result = cumulative_sum_adaptive(
+                data.copy(),
+                target_col,
+                mode=season_meta.get('mode', 'standard'),
+                season_start_week=peak_start
+            )
             data['cusum'] = cusum_result['cusum'].values
             
             data.reset_index(drop=True, inplace=True)
@@ -469,61 +436,88 @@ with tab2:
             proc_data = data.copy()
 
             status.update(label="Analyzing...", state="running", expanded=True)
-            best_window, best_score = optimize_window_size(proc_data, target_col, hockey_date, seasons, peak_start)
+            if window_eval_seasons:
+                best_window, best_score = optimize_window_size(
+                    proc_data,
+                    target_col,
+                    hockey_date,
+                    window_eval_seasons,
+                    peak_start
+                )
+            else:
+                best_window, best_score = 12, np.inf
             st.toast(f"Optimal Window Size Auto-selected: {best_window} Weeks")
-                
-            df_train, data_all_train = make_raw(proc_data, 'train', best_window, target_col)
-            df_train = df_train.dropna()
+
+            feature_col = ['slope', 'mean', 'CS_mean']
+            df_analysis, data_all_analysis = make_raw(proc_data, 'analysis', best_window, target_col)
+            valid_analysis_mask = df_analysis[feature_col].notna().all(axis=1)
+            df_analysis = df_analysis.loc[valid_analysis_mask].reset_index(drop=True)
+            data_all_analysis = data_all_analysis.loc[valid_analysis_mask].reset_index(drop=True)
+
+            if df_analysis.empty or data_all_analysis.empty:
+                st.error("No valid analysis windows were available after feature calculation.")
+                st.stop()
 
             status.update(label="Analyzing...", state="running", expanded=True)
-            
-            feature_col = ['slope', 'mean', 'CS_mean']
-            feature_name = [r'$\beta_{\omega}$', r'$\mu_{\omega}$', r'$\widebar{S_{\omega}}$']
-            
-            # Baseline K-means (C0)
-            result_data_t, kmeans, best_k, scaler = K_means_clustering(df_train)
+
+            result_data_t, kmeans, best_k, scaler = K_means_clustering(df_analysis)
             warning_label_t = result_data_t['label'].max()
-            ED_date = find_warning_periods(result_data_t, data_all_train, peak_start, warning_label_t)
-            
-            boot_ensemble, scaler = train_bootstrap_ensemble(df_train, scaler, feature_col, B=boot_num, k_best=best_k, types='random')
+            ED_date = find_warning_periods(result_data_t, data_all_analysis, peak_start, warning_label_t)
+
+            boot_ensemble, scaler = train_bootstrap_ensemble(df_analysis, scaler, feature_col, B=boot_num, k_best=best_k, types='random')
             status.update(label="Analyzing...", state="running", expanded=True)
 
             status.update(label="Visualizing...", state="running", expanded=True)
-            
-            date_df, label_df = analyze_train_distribution(df_train, data_all_train, feature_col, boot_ensemble, scaler, peak_start, ED_date)
-            train_season_summaries = {}
-            for season in date_df.columns:
-                _, summary = summarize_detection_progression(date_df[season])
-                train_season_summaries[int(season)] = summary
 
-            overall_plot_data = proc_data.copy()
-            overall_plot_data['set'] = 'train'
-            df_overall, data_all_overall = make_raw(overall_plot_data, 'train', best_window, target_col)
-            valid_overall_mask = df_overall[feature_col].notna().all(axis=1)
-            df_overall = df_overall.loc[valid_overall_mask].reset_index(drop=True)
-            data_all_overall = data_all_overall.loc[valid_overall_mask].reset_index(drop=True)
-            overall_date_df, overall_label_df = analyze_distribution_with_bootstrap(
-                df_overall,
-                data_all_overall,
+            date_df, label_df = analyze_train_distribution(
+                df_analysis,
+                data_all_analysis,
                 feature_col,
                 boot_ensemble,
                 scaler,
-                peak_start
+                peak_start,
+                ED_date
             )
-            
+
+            season_summary_blocks = []
+            for season in date_df.columns:
+                _, summary = summarize_detection_progression(date_df[season])
+                d_blue = format_alert_date(summary.get('blue_date'))
+                d_orange = format_alert_date(summary.get('orange_date'))
+                d_red = format_alert_date(summary.get('red_date'))
+                season_summary_blocks.append(f"""
+                <div style="margin-bottom: 18px;">
+                    <div style="font-size: 18px; font-weight: 800; color: #333; margin-bottom: 10px;">
+                        {int(season)}-{int(season)+1} Season
+                    </div>
+                    <div class="summary-card-container">
+                        <div class="summary-card" style="border-left: 8px solid #1f77b4;">
+                            <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 1: Attention (Blue)</div>
+                            <div style="font-size: 28px; color: #1f77b4; font-weight: 800; letter-spacing: 0.5px;">{d_blue}</div>
+                        </div>
+                        <div class="summary-card" style="border-left: 8px solid #ff7f0e;">
+                            <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 2: Caution (Orange)</div>
+                            <div style="font-size: 28px; color: #ff7f0e; font-weight: 800; letter-spacing: 0.5px;">{d_orange}</div>
+                        </div>
+                        <div class="summary-card" style="border-left: 8px solid #d62728;">
+                            <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 3: Alert (Red)</div>
+                            <div style="font-size: 28px; color: #d62728; font-weight: 800; letter-spacing: 0.5px;">{d_red}</div>
+                        </div>
+                    </div>
+                </div>
+                """)
+
             st.markdown("---")
             st.header("Analysis Report")
 
-            train_display_dates = proc_data.loc[proc_data['set'] == 'train', 'Date']
-            fit_display_start = train_display_dates.min() if not train_display_dates.empty else proc_data['Date'].min()
-
-            fitting_period_text = (
-                f"{fit_display_start.strftime('%Y/%m/%d')} ~ "
-                f"{period_meta['fit_end_date_user'].strftime('%Y/%m/%d')}"
+            analysis_period_text = (
+                f"{period_meta['analysis_start'].strftime('%Y/%m/%d')} ~ "
+                f"{period_meta['analysis_end'].strftime('%Y/%m/%d')}"
             )
-            realtime_period_text = (
-                f"{period_meta['simulation_start'].strftime('%Y/%m/%d')} ~ "
-                f"{proc_data['Date'].max().strftime('%Y/%m/%d')}"
+            season_count_text = (
+                f"{len(period_meta['analysis_seasons'])} seasons detected, "
+                f"{len(window_eval_seasons)} complete seasons used for window optimization "
+                f"({season_meta.get('mode', 'standard')} mode)"
             )
 
             st.markdown("""
@@ -627,16 +621,16 @@ with tab2:
             st.markdown(f"""
             <div class="period-card-grid">
                 <div class="period-card">
-                    <div class="period-card-title">Fitting Period</div>
-                    <div class="period-card-main">{fitting_period_text}</div>
-                    <div class="period-card-label">Model fitting range</div>
-                    <div class="period-card-detail">The first 3 years are reserved for feature extraction and are not used in fitting.</div>
+                    <div class="period-card-title">Analysis Period</div>
+                    <div class="period-card-main">{analysis_period_text}</div>
+                    <div class="period-card-label">Retrospective range</div>
+                    <div class="period-card-detail">The full available period is used to learn a stable signal pattern.</div>
                 </div>
                 <div class="period-card">
-                    <div class="period-card-title">Real-time Monitoring</div>
-                    <div class="period-card-main">{realtime_period_text}</div>
-                    <div class="period-card-label">Simulation range</div>
-                    <div class="period-card-detail">Simulation starts immediately after the selected training end date and proceeds season by season.</div>
+                    <div class="period-card-title">Window Calibration</div>
+                    <div class="period-card-main">{best_window} Weeks</div>
+                    <div class="period-card-label">Selected window size</div>
+                    <div class="period-card-detail">{season_count_text}</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -644,15 +638,14 @@ with tab2:
             st.markdown("""
             <div class="report-nav">
                 <a href="#overall-period-analysis">1. Overall</a>
-                <a href="#fitting-period-analysis">2. Fitting Period</a>
-                <a href="#simulation-analysis">3. Simulation</a>
+                <a href="#retrospective-analysis">2. Retrospective Analysis</a>
+                <a href="#season-summary">3. Season Summary</a>
             </div>
             """, unsafe_allow_html=True)
 
             other_dates = None
             if reference_dates is not None and len(reference_dates) > 0:
                 other_dates = {reference_label or 'User Input Date': reference_dates}
-
 
             st.markdown('<span id="overall-period-analysis" class="report-anchor"></span>', unsafe_allow_html=True)
             st.subheader("1. Overall Period Analysis")
@@ -661,9 +654,8 @@ with tab2:
                 target_col,
                 other_dates,
                 hockey_date,
-                overall_date_df,
-                best_window,
-                period_meta['fit_end_date_user']
+                date_df,
+                best_window
             )
             st.plotly_chart(fig_overall, use_container_width=True)
 
@@ -672,31 +664,28 @@ with tab2:
                 <span style="font-size: 22px;"><strong>Overall Period Analysis</strong></span><br>
                 <span style="font-size: 16px; color: #444; line-height: 1.6;">
                     <ul style="margin-top: 10px;">
-                        <li>This panel shows the full original time series for context.</li>
-                        <li>The blue shaded area marks the fitting period.</li>
-                        <li>The red shaded area marks the simulation period.</li>
+                        <li>This panel shows the full analysis time series for context.</li>
+                        <li>The chart keeps the visual focus on the observed signal pattern across the full period.</li>
                     </ul>
                 </span>
             </div>
             """, unsafe_allow_html=True)
             st.markdown("---")
 
-            st.markdown('<span id="fitting-period-analysis" class="report-anchor"></span>', unsafe_allow_html=True)
-            st.subheader("2. Bootstrap Early Warning Detection")
-            
-            # Apply the updated visualization function
+            st.markdown('<span id="retrospective-analysis" class="report-anchor"></span>', unsafe_allow_html=True)
+            st.subheader("2. Retrospective Bootstrap Early Warning Detection")
+
             fig1 = early_warning_visualization_bootstrap(
-                proc_data, data_all_train, target_col, other_dates, hockey_date, date_df, best_window
+                proc_data, data_all_analysis, target_col, other_dates, hockey_date, date_df, best_window
             )
-            
             st.plotly_chart(fig1, use_container_width=True)
-                
+
             st.markdown("""
             <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #2e86c1; margin-bottom: 20px;">
-                <span style="font-size: 22px;"><strong>Bootstrap Early Warning Detection (Train Data)</strong></span><br>
+                <span style="font-size: 22px;"><strong>Retrospective Bootstrap Early Warning Detection</strong></span><br>
                 <span style="font-size: 16px; color: #444; line-height: 1.6;">
                     <ul style="margin-top: 10px;">
-                        <li><strong style="color: #2CA02C;">Green Line (Hockey Stick)</strong>: Identifies the structural break point in the epidemic curve. This mathematical approach automatically optimizes the sliding window size by detecting the exact moment the trend shifts to exponential growth.</li>
+                        <li>The model is fitted on the full retrospective period instead of a train/test split.</li>
                         <li><strong style="color: #1F77B4;">Blue / Orange / Red Dashed Lines</strong>: Mark the first dates when the cumulative bootstrap detection share becomes positive, reaches 5%, and reaches 10% within each season.</li>
                         <li><strong>Cumulative Bars</strong>: Show how many bootstrap models have already issued their first warning by each date.</li>
                     </ul>
@@ -704,180 +693,55 @@ with tab2:
             </div>
             """, unsafe_allow_html=True)
             st.markdown("---")
-            
-            st.markdown('<span id="simulation-analysis" class="report-anchor"></span>', unsafe_allow_html=True)
-            st.subheader("3. Real-time Surveillance")
-            status.update(label="Simulation in Progress...", state="running", expanded=True)
-            
-            try:
-                test_seasons = period_meta['test_seasons']
-                if not test_seasons:
-                    st.error("No valid Test data available in the selected range.")
-                else:
-                    status.update(label="Simulation Visualization...", state="running", expanded=True)
-                    season_rt_results = []
-                    season_summary_blocks = []
-                    overlap_seasons = set(period_meta.get('overlap_seasons', []))
 
-                    for season in test_seasons:
-                        df_test, data_all_test = make_raw(
-                            proc_data, 'test', best_window, target_col, target_season=season
-                        )
+            st.markdown('<span id="season-summary" class="report-anchor"></span>', unsafe_allow_html=True)
+            st.subheader("3. Early Warning Timeline Summary by Season")
+            if season_summary_blocks:
+                st.markdown(f"""
+                <style>
+                    .summary-card-container {{
+                        display: flex;
+                        gap: 15px;
+                        margin-bottom: 30px;
+                    }}
+                    .summary-card {{
+                        flex: 1;
+                        background: white;
+                        padding: 25px 20px;
+                        border-radius: 12px;
+                        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+                        transition: background-color 0.3s ease, transform 0.2s ease;
+                    }}
+                    .summary-card:hover {{
+                        background-color: #f1f3f5 !important;
+                        transform: translateY(-3px);
+                    }}
+                </style>
+                {''.join(season_summary_blocks)}
+                """, unsafe_allow_html=True)
+            else:
+                st.info("No seasonal warning dates were detected by the bootstrap ensemble.")
 
-                        if df_test.empty or data_all_test.empty:
-                            continue
+            st.markdown("""
+            <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #2e86c1; margin-bottom: 20px;">
+                <span style="font-size: 22px;"><strong>Retrospective Analysis Results</strong></span><br>
+                <span style="font-size: 16px; color: #444; line-height: 1.6;">
+                    <ul style="margin-top: 10px;">
+                        <li>The full available period is used together for model fitting and retrospective signal detection.</li>
+                        <li>The sliding-window size is selected by comparing bootstrap warning dates with hockey-stick reference dates from complete seasons only.</li>
+                        <li>The final incomplete season is retained in the retrospective chart, but excluded from window-size calibration.</li>
+                        <li><strong>Interactive View:</strong> Use the <b>range slider</b> at the bottom of the chart to zoom into specific periods.</li>
+                    </ul>
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
 
-                        feature_cols_rt = ['slope', 'mean', 'CS_mean']
-                        valid_mask = df_test[feature_cols_rt].notna().all(axis=1)
-                        df_test = df_test.loc[valid_mask].reset_index(drop=True)
-                        data_all_test = data_all_test.loc[valid_mask].reset_index(drop=True)
-
-                        if df_test.empty or data_all_test.empty:
-                            st.warning(f"{int(season)}-{int(season)+1} season was skipped because real-time features contained only missing values.")
-                            continue
-
-                        season_test_dates = proc_data.loc[
-                            (proc_data['set'] == 'test') & (proc_data['Season'] == season),
-                            'Date'
-                        ]
-                        if season_test_dates.empty:
-                            continue
-
-                        season_sim_start = season_test_dates.min()
-                        season_start_display = proc_data.loc[proc_data['Season'] == season, 'Date'].min()
-                        season_end_display = proc_data.loc[proc_data['Season'] == season, 'Date'].max()
-                        rt_display_data = proc_data.loc[
-                            (proc_data['Date'] >= season_sim_start) &
-                            (proc_data['Date'] <= season_end_display)
-                        ].copy()
-                        fit_summary = train_season_summaries.get(int(season), {})
-                        fit_red_date = fit_summary.get('red_date')
-                        season_suppressed = (int(season) in overlap_seasons) and pd.notna(pd.to_datetime(fit_red_date, errors='coerce'))
-
-                        detection_timeline = pd.DataFrame(columns=['Date', 'Cumulative_Count', 'Cumulative_Ratio', 'Level'])
-                        shaded_range = None
-
-                        if season_suppressed:
-                            shaded_range = (season_sim_start, season_end_display)
-                            d_blue = "Suppressed"
-                            d_orange = "Suppressed"
-                            d_red = "Suppressed"
-                        else:
-                            initial_detection_dates = date_df[season] if season in overlap_seasons and season in date_df.columns else None
-                            _, _, bootstrap_dates, _ = predict_new_data_probability(
-                                df_test,
-                                data_all_test,
-                                boot_ensemble,
-                                scaler,
-                                peak_start,
-                                step=1,
-                                initial_detection_dates=initial_detection_dates
-                            )
-
-                            final_detect_dates = bootstrap_dates.iloc[:, -1] if not bootstrap_dates.empty else pd.Series(dtype='datetime64[ns]')
-                            detection_timeline, _ = summarize_detection_progression(
-                                final_detect_dates,
-                                monitoring_start=season_sim_start
-                            )
-
-                            _, d_blue, d_orange, d_red = interactive_real_time_chart(
-                                data_all=rt_display_data,
-                                detection_timeline=detection_timeline,
-                                other_dates=other_dates,
-                                epi=target_col,
-                                shaded_range=shaded_range
-                            )
-
-                        season_rt_results.append({
-                            'season': season,
-                            'display_data': rt_display_data,
-                            'detection_timeline': detection_timeline,
-                            'shaded_range': shaded_range,
-                            'season_boundary': season_start_display,
-                            'simulation_start': season_sim_start,
-                            'suppressed': season_suppressed,
-                        })
-
-                        season_summary_blocks.append(f"""
-                        <div style="margin-bottom: 18px;">
-                            <div style="font-size: 18px; font-weight: 800; color: #333; margin-bottom: 10px;">
-                                {int(season)}-{int(season)+1} Season
-                            </div>
-                            <div class="summary-card-container">
-                                <div class="summary-card" style="border-left: 8px solid #1f77b4;">
-                                    <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 1: Attention (Blue)</div>
-                                    <div style="font-size: 28px; color: #1f77b4; font-weight: 800; letter-spacing: 0.5px;">{d_blue}</div>
-                                </div>
-                                <div class="summary-card" style="border-left: 8px solid #ff7f0e;">
-                                    <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 2: Caution (Orange)</div>
-                                    <div style="font-size: 28px; color: #ff7f0e; font-weight: 800; letter-spacing: 0.5px;">{d_orange}</div>
-                                </div>
-                                <div class="summary-card" style="border-left: 8px solid #d62728;">
-                                    <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 3: Alert (Red)</div>
-                                    <div style="font-size: 28px; color: #d62728; font-weight: 800; letter-spacing: 0.5px;">{d_red}</div>
-                                </div>
-                            </div>
-                        </div>
-                        """)
-
-                    if season_rt_results:
-                        fig_interactive_combined = interactive_real_time_chart_combined(
-                            season_rt_results,
-                            target_col
-                        )
-
-                        st.plotly_chart(fig_interactive_combined, use_container_width=True)
-                        st.markdown(f"""
-                        <style>
-                            .summary-card-container {{
-                                display: flex;
-                                gap: 15px;
-                                margin-bottom: 30px;
-                            }}
-                            .summary-card {{
-                                flex: 1;
-                                background: white; 
-                                padding: 25px 20px;
-                                border-radius: 12px;
-                                box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-                                transition: background-color 0.3s ease, transform 0.2s ease;
-                                cursor: pointer; 
-                            }}
-                            .summary-card:hover {{
-                                background-color: #f1f3f5 !important; 
-                                transform: translateY(-3px); 
-                            }}
-                        </style>
-
-                        <div style="margin-top: 15px; margin-bottom: 10px; padding-left: 5px;">
-                            <span style="font-size: 20px; font-weight: 800; color: #333; letter-spacing: 0.5px;">Early Warning Timeline Summary by Season</span>
-                        </div>
-                        {''.join(season_summary_blocks)}
-                        """, unsafe_allow_html=True)
-
-                        st.divider()
-
-            except Exception as e:
-                st.error(f"Error during data slicing/prediction: {e}")
-            
             status.update(label="Analysis Complete", state="complete", expanded=False)
         except Exception as e:
             status.update(label="Analysis Error", state="error", expanded=True)
             st.error(f"Details: {e}")
             st.exception(e)
-
-        st.markdown("""
-        <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #2e86c1; margin-bottom: 20px;">
-            <span style="font-size: 22px;"><strong>Real-Time Surveillance Results</strong></span><br>
-            <span style="font-size: 16px; color: #444; line-height: 1.6;">
-                <ul style="margin-top: 10px;">
-                    <li>After the fitting period ends, the dashboard <strong>starts simulation immediately</strong> and tracks each season prospectively.</li>
-                    <li>The secondary axis shows the <strong>cumulative number of bootstrap models</strong> that have already produced their first seasonal warning by each date.</li>
-                    <li>An official seasonal alert is triggered when the cumulative share reaches <strong>10% or more</strong>, and each season can alert only once.</li>
-                    <li>If a season already triggered an alert during fitting, its simulation segment is shown as a <strong>gray-shaded block</strong> and no additional alert is issued.</li>
-                    <li><strong>Interactive View:</strong> Use the <b>range slider</b> at the bottom of the chart to zoom into specific periods.</li>
-                    <li><strong>Summary Cards:</strong> The cards below indicate the exact dates when each risk level (Attention, Caution, Alert) was first detected by the ensemble model.</li>
-                </ul>
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
+    else:
+        st.markdown("---")
+        st.header("Analysis Report")
+        st.info("Please review the settings in the left sidebar, then click Run Analysis to view the Analysis Report.")
