@@ -79,7 +79,7 @@ def build_season_warning_plot(data, season, epi, summary):
     )
 
     for key, label, color in [
-        ('blue_date', 'Attention', '#1f77b4'),
+        ('blue_date', 'Caution', '#1f77b4'),
         ('orange_date', 'Alert', '#ff7f0e'),
         ('red_date', 'Severe', '#d62728'),
     ]:
@@ -94,11 +94,11 @@ def build_season_warning_plot(data, season, epi, summary):
             line_width=5,
         )
         fig.add_annotation(
-            x=date_val + pd.Timedelta(days=2),
+            x=date_val + pd.Timedelta(days=3),
             y=max_y * 1.08,
             text=label,
             showarrow=False,
-            font=dict(size=12, color=color),
+            font=dict(size=14, color=color),
             textangle=-90,
         )
 
@@ -364,6 +364,270 @@ button[data-baseweb="tab"][aria-selected="true"] > div[data-testid="stMarkdownCo
 </style>
 """, unsafe_allow_html=True)
 
+def render_analysis_report(result):
+    full_period_data = result["full_period_data"]
+    proc_data = result["proc_data"]
+    data_all_analysis = result["data_all_analysis"]
+    target_col = result["target_col"]
+    other_dates = result["other_dates"]
+    hockey_date = result["hockey_date"]
+    date_df_display = result["date_df_display"]
+    best_window = result["best_window"]
+    season_summary_items = result["season_summary_items"]
+    analysis_period_text = result["analysis_period_text"]
+    season_count_text = result["season_count_text"]
+    warmup_text = result["warmup_text"]
+
+    st.markdown("---")
+    st.header("Analysis Report")
+
+    st.markdown("""
+    <style>
+        .period-card-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 20px;
+            margin: 14px 0 30px 0;
+        }
+        .period-card {
+            background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+            border: 1px solid #dbe4f0;
+            border-radius: 18px;
+            padding: 22px 22px 20px 22px;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+            min-height: 220px;
+        }
+        .period-card-title {
+            font-size: 22px;
+            font-weight: 800;
+            color: #334155;
+            margin-bottom: 14px;
+            letter-spacing: 0.25px;
+        }
+        .period-card-main {
+            font-size: 30px;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 18px;
+            line-height: 1.3;
+        }
+        .period-card-label {
+            font-size: 16px;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        .period-card-detail {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1e293b;
+            line-height: 1.55;
+            margin-bottom: 16px;
+        }
+        .period-card-note {
+            font-size: 18px;
+            color: #475569;
+            line-height: 1.7;
+            white-space: pre-line;
+            margin-top: 0;
+        }
+        .report-nav {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin: 2px 0 26px 0;
+        }
+        .report-nav a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 14px 22px;
+            border-radius: 999px;
+            border: 1px solid #cbd5e1;
+            background: #ffffff;
+            color: #1e293b;
+            font-size: 20px;
+            font-weight: 700;
+            text-decoration: none;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+        }
+        .report-anchor {
+            display: block;
+            position: relative;
+            top: -84px;
+            visibility: hidden;
+        }
+        @media (max-width: 900px) {
+            .period-card-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div class="period-card-grid">
+        <div class="period-card">
+            <div class="period-card-title">Analysis Period</div>
+            <div class="period-card-main">{analysis_period_text}</div>
+            <div class="period-card-label">Retrospective range</div>
+            <div class="period-card-detail">The full available period is used to learn a stable signal pattern.</div>
+        </div>
+        <div class="period-card">
+            <div class="period-card-title">Window Calibration</div>
+            <div class="period-card-main">{best_window} Weeks</div>
+            <div class="period-card-label">Selected window size</div>
+            <div class="period-card-detail">{season_count_text}</div>
+            <div class="period-card-note">{warmup_text}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="report-nav">
+        <a href="#overall-period-analysis">1. Overall</a>
+        <a href="#Simulation">2. Simulation</a>
+        <a href="#season-summary">3. Season Summary</a>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<span id="overall-period-analysis" class="report-anchor"></span>', unsafe_allow_html=True)
+    st.subheader("1. Overall Period Analysis")
+    fig_overall = overall_period_visualization_bootstrap(
+        full_period_data,
+        target_col,
+        other_dates,
+        hockey_date,
+        date_df_display,
+        best_window
+    )
+    st.plotly_chart(fig_overall, use_container_width=True)
+
+    st.markdown("""
+    <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #2e86c1; margin-bottom: 20px;">
+        <span style="font-size: 28px;"><strong>Overall Period Analysis</strong></span><br>
+        <span style="font-size: 20px; color: #444; line-height: 1.6;">
+            <ul style="margin-top: 10px;">
+                <li>This panel shows the full analysis time series for context.</li>
+                <li>The chart keeps the visual focus on the observed signal pattern across the full period.</li>
+            </ul>
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("---")
+
+    st.markdown('<span id="Simulation" class="report-anchor"></span>', unsafe_allow_html=True)
+    st.subheader("2. Epidemic Warning Simulation")
+    fig1 = early_warning_visualization_bootstrap_shared_axis_experiment(
+        full_period_data, data_all_analysis, target_col, other_dates, hockey_date, date_df_display, best_window
+    )
+    st.plotly_chart(fig1, use_container_width=True)
+
+    st.markdown("""
+    <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #2e86c1; margin-bottom: 20px;">
+        <span style="font-size: 28px;"><strong>Epidemic Warning Simulation</strong></span><br>
+        <span style="font-size: 20px; color: #444; line-height: 1.6;">
+            <ul style="margin-top: 10px;">
+                <li>The main panel shows the full original time series while detection is estimated from valid seasonal periods.</li>
+                <li>The right axis shows bootstrap warning probability (%), calculated as detected models divided by total bootstrap models.</li>
+                <li>The lower overview shares the same Date axis and highlights non-overlapping Caution, Alert, and Severe ranges over the original case bars.</li>
+            </ul>
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("---")
+
+    st.markdown('<span id="season-summary" class="report-anchor"></span>', unsafe_allow_html=True)
+    st.subheader("3. Early Warning Timeline Summary by Season")
+    if season_summary_items:
+        season_options = {
+            f"{item['season']}-{item['season'] + 1} Season": item
+            for item in season_summary_items
+        }
+        selected_season_labels = st.multiselect(
+            "Select seasons to display",
+            options=["All"] + list(season_options.keys()),
+            default=["All"],
+            key="season_summary_multiselect",
+        )
+        selected_specific_labels = [
+            label for label in selected_season_labels
+            if label != "All"
+        ]
+        if selected_specific_labels:
+            selected_summary_items = [
+                season_options[label]
+                for label in selected_specific_labels
+                if label in season_options
+            ]
+        else:
+            selected_summary_items = season_summary_items
+
+        st.markdown("""
+        <style>
+            .season-summary-title {
+                font-size: 28px;
+                font-weight: 900;
+                color: #333;
+                margin: 26px 0 12px 0;
+            }
+            .summary-card-container {
+                display: flex;
+                gap: 15px;
+                margin: 14px 0 34px 0;
+            }
+            .summary-card {
+                flex: 1;
+                background: white;
+                padding: 25px 20px;
+                border-radius: 12px;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            }
+        </style>
+        """, unsafe_allow_html=True)
+        for item in selected_summary_items:
+            season = item['season']
+            st.markdown(
+                f"<div class='season-summary-title'>{season}-{season + 1} Season</div>",
+                unsafe_allow_html=True
+            )
+            fig_season = build_season_warning_plot(proc_data, season, target_col, item['summary'])
+            st.plotly_chart(fig_season, use_container_width=True)
+            st.markdown(f"""
+            <div class="summary-card-container">
+                <div class="summary-card" style="border-left: 8px solid #1f77b4;">
+                    <div style="font-size: 18px; color: #666; font-weight: 700; margin-bottom: 5px;">Caution</div>
+                    <div style="font-size: 28px; color: #1f77b4; font-weight: 800; letter-spacing: 0.5px;">{item['blue']}</div>
+                </div>
+                <div class="summary-card" style="border-left: 8px solid #ff7f0e;">
+                    <div style="font-size: 18px; color: #666; font-weight: 700; margin-bottom: 5px;">Alert</div>
+                    <div style="font-size: 28px; color: #ff7f0e; font-weight: 800; letter-spacing: 0.5px;">{item['orange']}</div>
+                </div>
+                <div class="summary-card" style="border-left: 8px solid #d62728;">
+                    <div style="font-size: 18px; color: #666; font-weight: 700; margin-bottom: 5px;">Severe</div>
+                    <div style="font-size: 28px; color: #d62728; font-weight: 800; letter-spacing: 0.5px;">{item['red']}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No seasonal warning dates were detected by the bootstrap ensemble.")
+
+    st.markdown("""
+    <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #2e86c1; margin-bottom: 20px;">
+        <span style="font-size: 28px;"><strong>Retrospective Analysis Results</strong></span><br>
+        <span style="font-size: 20px; color: #444; line-height: 1.6;">
+            <ul style="margin-top: 10px;">
+                <li>The full available period is used together for model fitting and retrospective signal detection.</li>
+                <li>The sliding-window size is selected by comparing bootstrap warning dates with hockey-stick reference dates from complete seasons only.</li>
+                <li>Incomplete seasons remain visible in the chart, but the leading incomplete season is treated as a warm-up period and hidden from detection markers.</li>
+                <li><strong>Interactive View:</strong> Use the shared Date-axis overview to compare the original case pattern with the simulated warning ranges.</li>
+            </ul>
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
 tab1, tab2 = st.tabs(["Analysis Report", "Setup Guide"])
 with tab1:
     if run_btn:
@@ -491,6 +755,44 @@ with tab1:
                     'orange': d_orange,
                     'red': d_red,
                 })
+
+            analysis_period_text = (
+                f"{period_meta['analysis_start'].strftime('%Y/%m/%d')} ~ "
+                f"{period_meta['analysis_end'].strftime('%Y/%m/%d')}"
+            )
+            season_count_text = (
+                f"{len(period_meta['analysis_seasons'])} seasons detected, "
+                f"{len(window_eval_seasons)} complete seasons used for window optimization "
+                f"({season_meta.get('mode', 'standard')} mode)"
+            )
+            warmup_text = ""
+            if warmup_seasons:
+                warmup_text = (
+                    f"{len(warmup_seasons)} leading incomplete season "
+                    "is used for modeling context but hidden from detection markers."
+                )
+
+            other_dates = None
+            if reference_dates is not None and len(reference_dates) > 0:
+                other_dates = {reference_label or 'User Input Date': reference_dates}
+
+            st.session_state.pop("season_summary_multiselect", None)
+            st.session_state["analysis_result"] = {
+                "full_period_data": full_period_data,
+                "proc_data": proc_data,
+                "data_all_analysis": data_all_analysis,
+                "target_col": target_col,
+                "other_dates": other_dates,
+                "hockey_date": hockey_date,
+                "date_df_display": date_df_display,
+                "best_window": best_window,
+                "season_summary_items": season_summary_items,
+                "analysis_period_text": analysis_period_text,
+                "season_count_text": season_count_text,
+                "warmup_text": warmup_text,
+            }
+            status.update(label="Analysis Complete", state="complete", expanded=False)
+            st.rerun()
 
             st.markdown("---")
             st.header("Analysis Report")
@@ -679,8 +981,8 @@ with tab1:
 	                    <ul style="margin-top: 10px;">
 	                        <li>The main panel shows the full original time series while detection is estimated from valid seasonal periods.</li>
 	                        <li>The right axis shows bootstrap warning probability (%), calculated as detected models divided by total bootstrap models.</li>
-	                        <li><strong style="color: #1F77B4;">Attention / Alert / Severe Dashed Lines</strong>: Mark the first dates when warning probability becomes positive, reaches 5%, and reaches 10% within each season.</li>
-	                        <li>The lower overview shares the same Date axis and highlights non-overlapping Attention, Alert, and Severe ranges over the original case bars.</li>
+	                        <li><strong style="color: #1F77B4;">Caution / Alert / Severe Dashed Lines</strong>: Mark the first dates when warning probability becomes positive, reaches 5%, and reaches 10% within each season.</li>
+	                        <li>The lower overview shares the same Date axis and highlights non-overlapping Caution, Alert, and Severe ranges over the original case bars.</li>
 	                    </ul>
 	                </span>
             </div>
@@ -690,6 +992,29 @@ with tab1:
             st.markdown('<span id="season-summary" class="report-anchor"></span>', unsafe_allow_html=True)
             st.subheader("3. Early Warning Timeline Summary by Season")
             if season_summary_items:
+                season_options = {
+                    f"{item['season']}-{item['season'] + 1} Season": item
+                    for item in season_summary_items
+                }
+                selected_season_labels = st.multiselect(
+                    "Select seasons to display",
+                    options=["All"] + list(season_options.keys()),
+                    default=["All"],
+                    key="season_summary_multiselect",
+                )
+                selected_specific_labels = [
+                    label for label in selected_season_labels
+                    if label != "All"
+                ]
+                if selected_specific_labels:
+                    selected_summary_items = [
+                        season_options[label]
+                        for label in selected_specific_labels
+                        if label in season_options
+                    ]
+                else:
+                    selected_summary_items = season_summary_items
+
                 st.markdown("""
                 <style>
                     .season-summary-title {
@@ -717,7 +1042,7 @@ with tab1:
                     }
                 </style>
                 """, unsafe_allow_html=True)
-                for item in season_summary_items:
+                for item in selected_summary_items:
                     season = item['season']
                     st.markdown(
                         f"<div class='season-summary-title'>{season}-{season + 1} Season</div>",
@@ -728,7 +1053,7 @@ with tab1:
                     st.markdown(f"""
                     <div class="summary-card-container">
                         <div class="summary-card" style="border-left: 8px solid #1f77b4;">
-                            <div style="font-size: 18px; color: #666; font-weight: 700; margin-bottom: 5px;">Attention</div>
+                            <div style="font-size: 18px; color: #666; font-weight: 700; margin-bottom: 5px;">Caution</div>
                             <div style="font-size: 28px; color: #1f77b4; font-weight: 800; letter-spacing: 0.5px;">{item['blue']}</div>
                         </div>
                         <div class="summary-card" style="border-left: 8px solid #ff7f0e;">
@@ -757,16 +1082,36 @@ with tab1:
                 </span>
             </div>
             """, unsafe_allow_html=True)
+            st.session_state["analysis_result"] = {
+                "full_period_data": full_period_data,
+                "proc_data": proc_data,
+                "data_all_analysis": data_all_analysis,
+                "target_col": target_col,
+                "other_dates": other_dates,
+                "hockey_date": hockey_date,
+                "date_df_display": date_df_display,
+                "best_window": best_window,
+                "season_summary_items": season_summary_items,
+                "analysis_period_text": analysis_period_text,
+                "season_count_text": season_count_text,
+                "warmup_text": warmup_text,
+            }
 
             status.update(label="Analysis Complete", state="complete", expanded=False)
+
+
         except Exception as e:
             status.update(label="Analysis Error", state="error", expanded=True)
             st.error(f"Details: {e}")
             st.exception(e)
-    else:
+
+    result = st.session_state.get("analysis_result")
+    if result is None:
         st.markdown("---")
         st.header("Analysis Report")
         st.info("Please review the settings in the left sidebar, then click Run Analysis to view the Analysis Report.")
+    else:
+        render_analysis_report(result)
 
 with tab2:
     st.markdown("<h2 style='font-size: 32px; font-weight: 800; color: #2c3e50; margin-bottom: 20px;'>Getting Started & Setup</h2>", unsafe_allow_html=True)
@@ -881,4 +1226,3 @@ with tab2:
             <span style="font-size: 16px; color: #999;">(Insert your second plot code here later)</span>
         </div>
         """, unsafe_allow_html=True)
- 
