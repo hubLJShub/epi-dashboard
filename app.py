@@ -1000,7 +1000,7 @@ with tab1:
                     "Select seasons to display",
                     options=list(season_options.keys()),
                     default=list(season_options.keys()),
-                    key="season_summary_multiselect",
+                    key="season_summary_multiselect_V2",
                 )
                 # 3. "All" 체크 로직이 필요 없으므로 선택된 라벨을 그대로 사용합니다.
                 if selected_season_labels:
