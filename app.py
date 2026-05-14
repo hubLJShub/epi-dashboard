@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 from pathlib import Path
+import plotly.graph_objects as go
 
 # Import the modules used across preprocessing, modeling, and visualization.
 try:
@@ -18,6 +19,7 @@ try:
     )
     from src.visualization import (
         early_warning_visualization_bootstrap, 
+        early_warning_visualization_bootstrap_shared_axis_experiment,
         overall_period_visualization_bootstrap,
         visualization_season,
     )
@@ -51,6 +53,75 @@ def drop_warmup_detection_columns(date_df, warmup_seasons):
             continue
 
     return date_df.drop(columns=drop_cols, errors='ignore')
+
+def build_season_warning_plot(data, season, epi, summary):
+    season_data = data[data['Season'] == int(season)].copy()
+    season_data = season_data.sort_values('Date').reset_index(drop=True)
+
+    fig = go.Figure()
+    if season_data.empty:
+        fig.update_layout(
+            height=240,
+            margin=dict(l=40, r=30, t=20, b=45),
+            plot_bgcolor='white',
+        )
+        return fig
+
+    max_y = season_data[epi].max()
+    fig.add_trace(
+        go.Bar(
+            x=season_data['Date'],
+            y=season_data[epi],
+            name=epi,
+            marker_color='gray',
+            opacity=0.45,
+        )
+    )
+
+    for key, label, color in [
+        ('blue_date', 'Attention', '#1f77b4'),
+        ('orange_date', 'Alert', '#ff7f0e'),
+        ('red_date', 'Severe', '#d62728'),
+    ]:
+        date_val = pd.to_datetime(summary.get(key), errors='coerce')
+        if pd.isna(date_val):
+            continue
+        fig.add_vline(
+            x=date_val,
+            line_dash='dash',
+            line_color=color,
+            opacity=0.75,
+            line_width=5,
+        )
+        fig.add_annotation(
+            x=date_val + pd.Timedelta(days=2),
+            y=max_y * 1.08,
+            text=label,
+            showarrow=False,
+            font=dict(size=12, color=color),
+            textangle=-90,
+        )
+
+    fig.update_layout(
+        height=280,
+        margin=dict(l=40, r=30, t=20, b=45),
+        plot_bgcolor='white',
+        showlegend=False,
+        hovermode='x unified',
+        xaxis=dict(
+            title='Date',
+            range=[season_data['Date'].min(), season_data['Date'].max()],
+            type='date',
+        ),
+        yaxis=dict(
+            title=epi,
+            range=[0, max_y * 1.18 if pd.notna(max_y) and max_y > 0 else 1],
+            showgrid=True,
+            gridcolor='rgba(0,0,0,0.12)',
+            fixedrange=True,
+        ),
+    )
+    return fig
 
 # Choose the sliding-window size that best aligns clustering alerts with hockey-stick breakpoints.
 @st.cache_resource(show_spinner=False)
@@ -114,7 +185,7 @@ def optimize_window_size(_data, epi, hockey_dates, eval_seasons, peak_start):
     return best_window, best_score
 
 st.set_page_config(
-    page_title="Early Warning Dashboard",
+    page_title="EpiWARN",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -235,7 +306,20 @@ with st.sidebar:
     st.markdown("---")
     run_btn = st.button("Run Analysis", type="primary")
 
-st.title("Early Warning Dashboard for Seasonal Signals")
+st.markdown("""
+<div style="margin: 6px 0 18px 0; line-height: 1.08;">
+    <div style="font-size: 52px; font-weight: 900; color: #2c3e50; letter-spacing: 0;">
+        <span style="color: #1f77b4; font-weight: 900;">Epi</span><span style="color: #ff7f0e; font-weight: 900;">WA</span><span style="color: #b91c1c; font-weight: 900;">RN</span>
+    </div>
+    <div style="font-size: 34px; font-weight: 500; color: #2c3e50; letter-spacing: 0; margin-top: 6px;">
+        : <span style="font-weight: 900;">Epi</span>demic
+        <span style="font-size: 1.12em; font-weight: 900;">W</span>arning
+        simul<span style="font-size: 1.12em; font-weight: 900;">A</span>tion
+        for <span style="font-size: 1.12em; font-weight: 900;">R</span>eal-time
+        transmission dy<span style="font-size: 1.12em; font-weight: 900;">N</span>amics
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 st.markdown("""
 <div style="padding: 18px 22px; margin-bottom: 12px; font-size: 18px; line-height: 1.5; color: #000000; background-color: #f0f2f6; border-radius: 10px; border-top: 1px solid #d9d9d9;">
@@ -280,122 +364,8 @@ button[data-baseweb="tab"][aria-selected="true"] > div[data-testid="stMarkdownCo
 </style>
 """, unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["Setup Guide", "Analysis Report"])
+tab1, tab2 = st.tabs(["Analysis Report", "Setup Guide"])
 with tab1:
-    st.markdown("<h2 style='font-size: 32px; font-weight: 800; color: #2c3e50; margin-bottom: 20px;'>Getting Started & Setup</h2>", unsafe_allow_html=True)
-    st.markdown("""
-    <style>
-    div[data-testid="stExpander"] details summary p,
-    div[data-testid="stExpander"] details summary span,
-    [data-testid="stExpander"] summary p,
-    [data-testid="stExpander"] summary span {
-        font-size: 24px !important; 
-        font-weight: 800 !important;
-        color: #2c3e50 !important; /* Dark navy tone that matches the main heading */
-    }
-    /* Slightly enlarge the chevron icon to match the heading text size */
-    [data-testid="stExpander"] summary svg {
-        width: 24px !important;
-        height: 24px !important;
-        color: #2c3e50 !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    with st.expander("0. Introduction", expanded=True):
-        col1, col2 = st.columns([0.7, 2.3], gap="large")
-        
-        with col1:
-            import os
-            import base64
-            
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            img_path = os.path.join(current_dir, "images", "intro_example.png")
-            
-            try:
-                with open(img_path, "rb") as image_file:
-                    encoded_string = base64.b64encode(image_file.read()).decode()
-                st.markdown(f"""
-                <div style="
-                    min-height: 500px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 5px 0 40px 0;
-                ">
-                    <img src="data:image/png;base64,{encoded_string}" style="
-                        max-width: 88%;
-                        max-height: 360px;
-                        object-fit: contain;
-                        border-radius: 8px;
-                        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                    ">
-                </div>
-                """, unsafe_allow_html=True)
-            except Exception as e:
-                st.error(f"Image load error: {e}")
-
-        with col2:
-            st.markdown("""
-            <div style="min-height: 500px; border-left: 5px solid #1f77b4; background-color: #f8fbff; padding: 20px 25px; border-radius: 0 8px 8px 0; margin-top: 5px; margin-bottom: 40px; display: flex; flex-direction: column; justify-content: center;">
-                <div style="color: #000000; line-height: 1.6; font-size: 20px;">
-                    <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px;">
-                        What this dashboard does
-                    </div>
-                    <div style="margin-left: 18px; margin-bottom: 26px;">
-                        - Detects early warning signals from seasonal time-series data<br>
-                        - Identifies when signal activity begins within a season
-                    </div>
-                    <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px;">
-                        How the analysis works
-                    </div>
-                    <div style="margin-left: 18px; margin-bottom: 26px;">
-                        - The full retrospective period is used to learn a stable baseline pattern<br>
-                        - <strong>At least 1 year</strong> of data is required; <strong>4 years</strong> or more uses the standard season algorithm<br>
-                    </div>
-                    <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px;">
-                        How to set it up
-                    </div>
-                    <div style="margin-left: 18px;">
-                        - Upload your data, configure the settings, and click <strong>Run Analysis</strong><br>
-                        - Review retrospective signal detection results in the <strong>Analysis Report</strong>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-    with st.expander("1. Setup Guide", expanded=False):
-        import os
-        import base64
-        
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        setting_img_path = os.path.join(current_dir, "images", "Setting_guide.png")
-        
-        try:
-            with open(setting_img_path, "rb") as image_file:
-                encoded_setting_img = base64.b64encode(image_file.read()).decode()
-            st.markdown(f"""
-                <div style="display: flex; justify-content: center; padding: 20px 0;">
-                    <img src="data:image/jpeg;base64,{encoded_setting_img}" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                </div>
-            """, unsafe_allow_html=True)
-            
-        except Exception as e:
-            st.error(f"Image load error: {e}")
-            st.info("💡 'images' 폴더 안에 'Setting_guide.jpg' 파일이 있는지, 파일명 대소문자가 정확한지 확인해주세요!")
-
-    with st.expander("2. Dashboard Analysis", expanded=False):
-        st.markdown("""
-        <div style="border: 2px dashed #ccc; border-radius: 8px; padding: 80px 20px; text-align: center; margin-bottom: 25px; margin-top: 15px; background-color: #fafafa;">
-            <span style="font-size: 26px; color: #555; font-weight: bold;">Plot 1</span><br>
-            <span style="font-size: 16px; color: #999;">(Insert your first plot code here later)</span>
-        </div>
-        
-        <div style="border: 2px dashed #ccc; border-radius: 8px; padding: 80px 20px; text-align: center; margin-bottom: 15px; background-color: #fafafa;">
-            <span style="font-size: 26px; color: #555; font-weight: bold;">Plot 2</span><br>
-            <span style="font-size: 16px; color: #999;">(Insert your second plot code here later)</span>
-        </div>
-        """, unsafe_allow_html=True)
-
-with tab2:
     if run_btn:
         status = st.status("Preprocessing...", expanded=True)
         
@@ -406,6 +376,7 @@ with tab2:
                 proc_data['Year'] = proc_data['Date'].dt.year
             if 'Week' not in proc_data.columns:
                 proc_data['Week'] = proc_data['Date'].dt.isocalendar().week
+            full_period_data = proc_data.copy()
             status.update(label="Preprocessing...", state="running", expanded=True)
             season_df, season_meta = set_season_start_week_adaptive(proc_data, target_col)
             if season_meta.get('mode') == 'insufficient':
@@ -507,33 +478,19 @@ with tab2:
             warmup_seasons = period_meta.get('warmup_seasons', [])
             date_df_display = drop_warmup_detection_columns(date_df, warmup_seasons)
 
-            season_summary_blocks = []
+            season_summary_items = []
             for season in date_df_display.columns:
                 _, summary = summarize_detection_progression(date_df_display[season])
-                d_blue = format_alert_date(summary.get('blue_date'))
-                d_orange = format_alert_date(summary.get('orange_date'))
-                d_red = format_alert_date(summary.get('red_date'))
-                season_summary_blocks.append(f"""
-                <div style="margin-bottom: 18px;">
-                    <div style="font-size: 18px; font-weight: 800; color: #333; margin-bottom: 10px;">
-                        {int(season)}-{int(season)+1} Season
-                    </div>
-                    <div class="summary-card-container">
-                        <div class="summary-card" style="border-left: 8px solid #1f77b4;">
-                            <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 1: Attention (Blue)</div>
-                            <div style="font-size: 28px; color: #1f77b4; font-weight: 800; letter-spacing: 0.5px;">{d_blue}</div>
-                        </div>
-                        <div class="summary-card" style="border-left: 8px solid #ff7f0e;">
-                            <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 2: Caution (Orange)</div>
-                            <div style="font-size: 28px; color: #ff7f0e; font-weight: 800; letter-spacing: 0.5px;">{d_orange}</div>
-                        </div>
-                        <div class="summary-card" style="border-left: 8px solid #d62728;">
-                            <div style="font-size: 14px; color: #666; font-weight: 600; margin-bottom: 5px;">Level 3: Alert (Red)</div>
-                            <div style="font-size: 28px; color: #d62728; font-weight: 800; letter-spacing: 0.5px;">{d_red}</div>
-                        </div>
-                    </div>
-                </div>
-                """)
+                d_blue = format_alert_date(summary.get('blue_date'), fallback="-")
+                d_orange = format_alert_date(summary.get('orange_date'), fallback="-")
+                d_red = format_alert_date(summary.get('red_date'), fallback="-")
+                season_summary_items.append({
+                    'season': int(season),
+                    'summary': summary,
+                    'blue': d_blue,
+                    'orange': d_orange,
+                    'red': d_red,
+                })
 
             st.markdown("---")
             st.header("Analysis Report")
@@ -576,13 +533,13 @@ with tab2:
                     box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12);
                     border-color: #bfdbfe;
                 }
-                .period-card-title {
-                    font-size: 16px;
-                    font-weight: 800;
-                    color: #334155;
-                    margin-bottom: 14px;
-                    letter-spacing: 0.25px;
-                }
+	                .period-card-title {
+	                    font-size: 22px;
+	                    font-weight: 800;
+	                    color: #334155;
+	                    margin-bottom: 14px;
+	                    letter-spacing: 0.25px;
+	                }
                 .period-card-main {
                     font-size: 30px;
                     font-weight: 800;
@@ -590,27 +547,27 @@ with tab2:
                     margin-bottom: 18px;
                     line-height: 1.3;
                 }
-                .period-card-label {
-                    font-size: 13px;
-                    font-weight: 700;
-                    color: #64748b;
-                    text-transform: uppercase;
-                    letter-spacing: 0.5px;
-                    margin-bottom: 6px;
-                }
-                .period-card-detail {
-                    font-size: 16px;
-                    font-weight: 600;
-                    color: #1e293b;
-                    line-height: 1.55;
-                    margin-bottom: 16px;
-                }
-                .period-card-note {
-                    font-size: 14px;
-                    color: #475569;
-                    line-height: 1.7;
-                    white-space: pre-line;
-                    margin-top: 0;
+	                .period-card-label {
+	                    font-size: 16px;
+	                    font-weight: 700;
+	                    color: #64748b;
+	                    text-transform: uppercase;
+	                    letter-spacing: 0.5px;
+	                    margin-bottom: 6px;
+	                }
+	                .period-card-detail {
+	                    font-size: 20px;
+	                    font-weight: 600;
+	                    color: #1e293b;
+	                    line-height: 1.55;
+	                    margin-bottom: 16px;
+	                }
+	                .period-card-note {
+	                    font-size: 18px;
+	                    color: #475569;
+	                    line-height: 1.7;
+	                    white-space: pre-line;
+	                    margin-top: 0;
                 }
                 .report-nav {
                     display: flex;
@@ -622,12 +579,12 @@ with tab2:
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    padding: 10px 16px;
+	                    padding: 14px 22px;
                     border-radius: 999px;
                     border: 1px solid #cbd5e1;
                     background: #ffffff;
                     color: #1e293b;
-                    font-size: 14px;
+	                    font-size: 20px;
                     font-weight: 700;
                     text-decoration: none;
                     transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
@@ -673,7 +630,7 @@ with tab2:
             st.markdown("""
             <div class="report-nav">
                 <a href="#overall-period-analysis">1. Overall</a>
-                <a href="#retrospective-analysis">2. Retrospective Analysis</a>
+                <a href="#Simulation">2. Simulation</a>
                 <a href="#season-summary">3. Season Summary</a>
             </div>
             """, unsafe_allow_html=True)
@@ -685,7 +642,7 @@ with tab2:
             st.markdown('<span id="overall-period-analysis" class="report-anchor"></span>', unsafe_allow_html=True)
             st.subheader("1. Overall Period Analysis")
             fig_overall = overall_period_visualization_bootstrap(
-                proc_data,
+                full_period_data,
                 target_col,
                 other_dates,
                 hockey_date,
@@ -696,8 +653,8 @@ with tab2:
 
             st.markdown("""
             <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #2e86c1; margin-bottom: 20px;">
-                <span style="font-size: 22px;"><strong>Overall Period Analysis</strong></span><br>
-                <span style="font-size: 16px; color: #444; line-height: 1.6;">
+	                <span style="font-size: 28px;"><strong>Overall Period Analysis</strong></span><br>
+	                <span style="font-size: 20px; color: #444; line-height: 1.6;">
                     <ul style="margin-top: 10px;">
                         <li>This panel shows the full analysis time series for context.</li>
                         <li>The chart keeps the visual focus on the observed signal pattern across the full period.</li>
@@ -707,66 +664,96 @@ with tab2:
             """, unsafe_allow_html=True)
             st.markdown("---")
 
-            st.markdown('<span id="retrospective-analysis" class="report-anchor"></span>', unsafe_allow_html=True)
-            st.subheader("2. Retrospective Bootstrap Early Warning Detection")
+            st.markdown('<span id="Simulation" class="report-anchor"></span>', unsafe_allow_html=True)
+            st.subheader("2. Epidemic Warning Simulation")
 
-            fig1 = early_warning_visualization_bootstrap(
-                proc_data, data_all_analysis, target_col, other_dates, hockey_date, date_df_display, best_window
+            fig1 = early_warning_visualization_bootstrap_shared_axis_experiment(
+                full_period_data, data_all_analysis, target_col, other_dates, hockey_date, date_df_display, best_window
             )
             st.plotly_chart(fig1, use_container_width=True)
 
             st.markdown("""
             <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #2e86c1; margin-bottom: 20px;">
-                <span style="font-size: 22px;"><strong>Retrospective Bootstrap Early Warning Detection</strong></span><br>
-                <span style="font-size: 16px; color: #444; line-height: 1.6;">
-                    <ul style="margin-top: 10px;">
-                        <li>The model is fitted on the full retrospective period instead of a train/test split.</li>
-                        <li><strong style="color: #1F77B4;">Blue / Orange / Red Dashed Lines</strong>: Mark the first dates when the cumulative bootstrap detection share becomes positive, reaches 5%, and reaches 10% within each season.</li>
-                        <li><strong>Cumulative Bars</strong>: Show how many bootstrap models have already issued their first warning by each date.</li>
-                    </ul>
-                </span>
+	                <span style="font-size: 28px;"><strong>Epidemic Warning Simulation</strong></span><br>
+	                <span style="font-size: 20px; color: #444; line-height: 1.6;">
+	                    <ul style="margin-top: 10px;">
+	                        <li>The main panel shows the full original time series while detection is estimated from valid seasonal periods.</li>
+	                        <li>The right axis shows bootstrap warning probability (%), calculated as detected models divided by total bootstrap models.</li>
+	                        <li><strong style="color: #1F77B4;">Attention / Alert / Severe Dashed Lines</strong>: Mark the first dates when warning probability becomes positive, reaches 5%, and reaches 10% within each season.</li>
+	                        <li>The lower overview shares the same Date axis and highlights non-overlapping Attention, Alert, and Severe ranges over the original case bars.</li>
+	                    </ul>
+	                </span>
             </div>
             """, unsafe_allow_html=True)
             st.markdown("---")
 
             st.markdown('<span id="season-summary" class="report-anchor"></span>', unsafe_allow_html=True)
             st.subheader("3. Early Warning Timeline Summary by Season")
-            if season_summary_blocks:
-                st.markdown(f"""
+            if season_summary_items:
+                st.markdown("""
                 <style>
-                    .summary-card-container {{
+                    .season-summary-title {
+                        font-size: 28px;
+                        font-weight: 900;
+                        color: #333;
+                        margin: 26px 0 12px 0;
+                    }
+                    .summary-card-container {
                         display: flex;
                         gap: 15px;
-                        margin-bottom: 30px;
-                    }}
-                    .summary-card {{
+                        margin: 14px 0 34px 0;
+                    }
+                    .summary-card {
                         flex: 1;
                         background: white;
                         padding: 25px 20px;
                         border-radius: 12px;
                         box-shadow: 0 4px 15px rgba(0,0,0,0.05);
                         transition: background-color 0.3s ease, transform 0.2s ease;
-                    }}
-                    .summary-card:hover {{
+                    }
+                    .summary-card:hover {
                         background-color: #f1f3f5 !important;
                         transform: translateY(-3px);
-                    }}
+                    }
                 </style>
-                {''.join(season_summary_blocks)}
                 """, unsafe_allow_html=True)
+                for item in season_summary_items:
+                    season = item['season']
+                    st.markdown(
+                        f"<div class='season-summary-title'>{season}-{season + 1} Season</div>",
+                        unsafe_allow_html=True
+                    )
+                    fig_season = build_season_warning_plot(proc_data, season, target_col, item['summary'])
+                    st.plotly_chart(fig_season, use_container_width=True)
+                    st.markdown(f"""
+                    <div class="summary-card-container">
+                        <div class="summary-card" style="border-left: 8px solid #1f77b4;">
+                            <div style="font-size: 18px; color: #666; font-weight: 700; margin-bottom: 5px;">Attention</div>
+                            <div style="font-size: 28px; color: #1f77b4; font-weight: 800; letter-spacing: 0.5px;">{item['blue']}</div>
+                        </div>
+                        <div class="summary-card" style="border-left: 8px solid #ff7f0e;">
+                            <div style="font-size: 18px; color: #666; font-weight: 700; margin-bottom: 5px;">Alert</div>
+                            <div style="font-size: 28px; color: #ff7f0e; font-weight: 800; letter-spacing: 0.5px;">{item['orange']}</div>
+                        </div>
+                        <div class="summary-card" style="border-left: 8px solid #d62728;">
+                            <div style="font-size: 18px; color: #666; font-weight: 700; margin-bottom: 5px;">Severe</div>
+                            <div style="font-size: 28px; color: #d62728; font-weight: 800; letter-spacing: 0.5px;">{item['red']}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
             else:
                 st.info("No seasonal warning dates were detected by the bootstrap ensemble.")
 
             st.markdown("""
             <div style="background-color: #f9f9f9; padding: 15px; border-left: 5px solid #2e86c1; margin-bottom: 20px;">
-                <span style="font-size: 22px;"><strong>Retrospective Analysis Results</strong></span><br>
-                <span style="font-size: 16px; color: #444; line-height: 1.6;">
-	                    <ul style="margin-top: 10px;">
-	                        <li>The full available period is used together for model fitting and retrospective signal detection.</li>
-	                        <li>The sliding-window size is selected by comparing bootstrap warning dates with hockey-stick reference dates from complete seasons only.</li>
-	                        <li>Incomplete seasons remain visible in the chart, but the leading incomplete season is treated as a warm-up period and hidden from detection markers.</li>
-	                        <li><strong>Interactive View:</strong> Use the <b>range slider</b> at the bottom of the chart to zoom into specific periods.</li>
-	                    </ul>
+	                <span style="font-size: 28px;"><strong>Retrospective Analysis Results</strong></span><br>
+	                <span style="font-size: 20px; color: #444; line-height: 1.6;">
+		                    <ul style="margin-top: 10px;">
+		                        <li>The full available period is used together for model fitting and retrospective signal detection.</li>
+		                        <li>The sliding-window size is selected by comparing bootstrap warning dates with hockey-stick reference dates from complete seasons only.</li>
+		                        <li>Incomplete seasons remain visible in the chart, but the leading incomplete season is treated as a warm-up period and hidden from detection markers.</li>
+		                        <li><strong>Interactive View:</strong> Use the shared Date-axis overview to compare the original case pattern with the simulated warning ranges.</li>
+		                    </ul>
                 </span>
             </div>
             """, unsafe_allow_html=True)
@@ -780,3 +767,117 @@ with tab2:
         st.markdown("---")
         st.header("Analysis Report")
         st.info("Please review the settings in the left sidebar, then click Run Analysis to view the Analysis Report.")
+
+with tab2:
+    st.markdown("<h2 style='font-size: 32px; font-weight: 800; color: #2c3e50; margin-bottom: 20px;'>Getting Started & Setup</h2>", unsafe_allow_html=True)
+    st.markdown("""
+    <style>
+    div[data-testid="stExpander"] details summary p,
+    div[data-testid="stExpander"] details summary span,
+    [data-testid="stExpander"] summary p,
+    [data-testid="stExpander"] summary span {
+        font-size: 24px !important; 
+        font-weight: 800 !important;
+        color: #2c3e50 !important; /* Dark navy tone that matches the main heading */
+    }
+    /* Slightly enlarge the chevron icon to match the heading text size */
+    [data-testid="stExpander"] summary svg {
+        width: 24px !important;
+        height: 24px !important;
+        color: #2c3e50 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    with st.expander("0. Introduction", expanded=True):
+        col1, col2 = st.columns([0.7, 2.3], gap="large")
+        
+        with col1:
+            import os
+            import base64
+            
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            img_path = os.path.join(current_dir, "images", "intro_example.png")
+            
+            try:
+                with open(img_path, "rb") as image_file:
+                    encoded_string = base64.b64encode(image_file.read()).decode()
+                st.markdown(f"""
+                <div style="
+                    min-height: 500px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 5px 0 40px 0;
+                ">
+                    <img src="data:image/png;base64,{encoded_string}" style="
+                        max-width: 88%;
+                        max-height: 360px;
+                        object-fit: contain;
+                        border-radius: 8px;
+                        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                    ">
+                </div>
+                """, unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Image load error: {e}")
+
+        with col2:
+            st.markdown("""
+            <div style="min-height: 500px; border-left: 5px solid #1f77b4; background-color: #f8fbff; padding: 20px 25px; border-radius: 0 8px 8px 0; margin-top: 5px; margin-bottom: 40px; display: flex; flex-direction: column; justify-content: center;">
+                <div style="color: #000000; line-height: 1.6; font-size: 20px;">
+                    <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px;">
+                        What this dashboard does
+                    </div>
+                    <div style="margin-left: 18px; margin-bottom: 26px;">
+                        - Detects early warning signals from seasonal time-series data<br>
+                        - Identifies when signal activity begins within a season
+                    </div>
+                    <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px;">
+                        How the analysis works
+                    </div>
+                    <div style="margin-left: 18px; margin-bottom: 26px;">
+                        - The full retrospective period is used to learn a stable baseline pattern<br>
+                        - <strong>At least 1 year</strong> of data is required, <strong>4 years</strong> or more uses the standard season algorithm<br>
+                    </div>
+                    <div style="font-size: 28px; font-weight: 800; margin-bottom: 5px;">
+                        How to set it up
+                    </div>
+                    <div style="margin-left: 18px;">
+                        - Upload your data, configure the settings, and click <strong>Run Analysis</strong><br>
+                        - Review retrospective signal detection results in the <strong>Analysis Report</strong>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    with st.expander("1. Setup Guide", expanded=False):
+        import os
+        import base64
+        
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        setting_img_path = os.path.join(current_dir, "images", "Setting_guide.png")
+        
+        try:
+            with open(setting_img_path, "rb") as image_file:
+                encoded_setting_img = base64.b64encode(image_file.read()).decode()
+            st.markdown(f"""
+                <div style="display: flex; justify-content: center; padding: 20px 0;">
+                    <img src="data:image/jpeg;base64,{encoded_setting_img}" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                </div>
+            """, unsafe_allow_html=True)
+            
+        except Exception as e:
+            st.error(f"Image load error: {e}")
+            st.info("💡 'images' 폴더 안에 'Setting_guide.jpg' 파일이 있는지, 파일명 대소문자가 정확한지 확인해주세요!")
+
+    with st.expander("2. Dashboard Analysis", expanded=False):
+        st.markdown("""
+        <div style="border: 2px dashed #ccc; border-radius: 8px; padding: 80px 20px; text-align: center; margin-bottom: 25px; margin-top: 15px; background-color: #fafafa;">
+            <span style="font-size: 26px; color: #555; font-weight: bold;">Plot 1</span><br>
+            <span style="font-size: 16px; color: #999;">(Insert your first plot code here later)</span>
+        </div>
+        
+        <div style="border: 2px dashed #ccc; border-radius: 8px; padding: 80px 20px; text-align: center; margin-bottom: 15px; background-color: #fafafa;">
+            <span style="font-size: 26px; color: #555; font-weight: bold;">Plot 2</span><br>
+            <span style="font-size: 16px; color: #999;">(Insert your second plot code here later)</span>
+        </div>
+        """, unsafe_allow_html=True)
