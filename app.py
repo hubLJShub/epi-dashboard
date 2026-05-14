@@ -998,8 +998,8 @@ with tab1:
                 }
                 selected_season_labels = st.multiselect(
                     "Select seasons to display",
-                    options=["All"] + list(season_options.keys()),
-                    default=["All"],
+                    options=list(season_options.keys()),
+                    default=list(season_options.keys()),
                     key="season_summary_multiselect",
                 )
                 selected_specific_labels = [
