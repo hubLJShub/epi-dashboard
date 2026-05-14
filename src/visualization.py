@@ -11,9 +11,9 @@ def _level_dates_from_timeline(timeline_df):
     if timeline_df is None or timeline_df.empty:
         return {'blue': None, 'orange': None, 'red': None}
 
-    blue_rows = timeline_df[timeline_df['Cumulative_Ratio'] > 0]
-    orange_rows = timeline_df[timeline_df['Cumulative_Ratio'] >= 0.05]
-    red_rows = timeline_df[timeline_df['Cumulative_Ratio'] >= 0.10]
+    blue_rows = timeline_df[timeline_df['Level'] == 'blue']
+    orange_rows = timeline_df[timeline_df['Level'] == 'orange']
+    red_rows = timeline_df[timeline_df['Level'] == 'red']
 
     return {
         'blue': blue_rows.iloc[0]['Date'] if not blue_rows.empty else None,
@@ -30,9 +30,9 @@ def _add_cumulative_detection_overlay(fig, timeline_df, secondary_y=True, legend
     level_dates = _level_dates_from_timeline(timeline_df)
 
     level_specs = [
-        ('blue', 'Attention (Blue)', 'blue'),
-        ('orange', 'Caution (Orange)', 'orange'),
-        ('red', 'Alert (Red)', 'red'),
+        ('blue', 'Attention', 'blue'),
+        ('orange', 'Alert', 'orange'),
+        ('red', 'Severe', 'red'),
     ]
 
     for level, name, color in level_specs:
@@ -527,6 +527,7 @@ def _build_bootstrap_detection_timeline(
     y_max_limit = max_y * (1.6 if other_dates is not None else 1.32)
     fig.update_layout(
         xaxis=dict(
+            title="Date",
             range=[x.min(), x.max()],
             rangeslider=dict(visible=True, thickness=0.15, bgcolor="#EAEAEA"),
             type="date"
@@ -552,6 +553,254 @@ def _build_bootstrap_detection_timeline(
     )
     return fig
 
+def _build_bootstrap_detection_timeline_shared_axis_experiment(
+    data,
+    epi,
+    other_dates,
+    hockey_dates,
+    date_df,
+    sample_window,
+    show_blue_band=True,
+):
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        row_heights=[0.82, 0.18],
+        vertical_spacing=0.035,
+        specs=[[{"secondary_y": True}], [{"secondary_y": True}]]
+    )
+    data = data.sort_values('Date').reset_index(drop=True)
+    x = data['Date']
+    y = data[epi]
+    max_y = y.max()
+    top_line_y = max_y * 1.28
+
+    fig.add_trace(
+        go.Bar(
+            x=x,
+            y=y,
+            name=f"{epi} Patients",
+            marker_color='gray',
+            opacity=0.35
+        ),
+        row=1,
+        col=1,
+        secondary_y=False,
+    )
+    fig.add_trace(
+        go.Bar(
+            x=x,
+            y=y,
+            name=f"{epi} Overview",
+            marker_color='gray',
+            opacity=0.30,
+            showlegend=False
+        ),
+        row=2,
+        col=1,
+        secondary_y=False,
+    )
+
+    if other_dates is not None:
+        fig.add_hline(y=top_line_y, line_color='black', line_width=1, row=1, col=1)
+        ref_colors = ['#ef4444', '#f97316', '#a855f7']
+        ref_markers = ['star', 'triangle-up', 'diamond']
+        ref_dashes = ['solid', 'dash', 'dot']
+
+        for j, (key, dates) in enumerate(other_dates.items()):
+            color = ref_colors[j % len(ref_colors)]
+            marker = ref_markers[j % len(ref_markers)]
+            dash = ref_dashes[j % len(ref_dashes)]
+
+            for i, date in enumerate(pd.to_datetime(dates, errors='coerce')):
+                if pd.isna(date):
+                    continue
+                if date < x.min() or date > x.max():
+                    continue
+                fig.add_trace(
+                    go.Scatter(
+                        x=[date],
+                        y=[max_y * (1.38 + 0.08 * j)],
+                        mode='markers',
+                        marker=dict(color=color, symbol=marker, size=10),
+                        name=key,
+                        showlegend=(i == 0),
+                        hoverinfo='name+x'
+                    ),
+                    row=1,
+                    col=1,
+                    secondary_y=False,
+                )
+                fig.add_shape(
+                    type='line',
+                    x0=date,
+                    x1=date,
+                    y0=top_line_y,
+                    y1=max_y * (1.34 + 0.08 * j),
+                    line=dict(color=color, dash=dash, width=2),
+                    row=1,
+                    col=1,
+                )
+
+    max_probability = 0
+    legend_seen = set()
+    thin_width = 3 * 24 * 60 * 60 * 1000
+    half_week = pd.Timedelta(days=3.5)
+    season_columns = sorted(date_df.columns) if len(date_df.columns) > 0 else []
+    for col in season_columns:
+        detect_dates = pd.to_datetime(date_df[col], errors='coerce').dt.normalize()
+        valid_dates = detect_dates.dropna()
+        if valid_dates.empty:
+            continue
+
+        counts = valid_dates.value_counts().sort_index()
+        counts = counts[(counts.index >= x.min()) & (counts.index <= x.max())]
+        if counts.empty:
+            continue
+
+        cumulative_counts = counts.cumsum()
+        timeline_df = pd.DataFrame({
+            'Date': cumulative_counts.index,
+            'Cumulative_Count': cumulative_counts.values,
+            'Cumulative_Ratio': cumulative_counts.values / len(detect_dates),
+        })
+        timeline_df['Cumulative_Probability'] = timeline_df['Cumulative_Ratio'] * 100
+        timeline_df['Level'] = np.select(
+            [
+                timeline_df['Cumulative_Ratio'] >= 0.10,
+                timeline_df['Cumulative_Ratio'] >= 0.05,
+                timeline_df['Cumulative_Ratio'] > 0,
+            ],
+            ['red', 'orange', 'blue'],
+            default='none'
+        )
+        max_probability = max(max_probability, float(timeline_df['Cumulative_Probability'].max()))
+
+        for level, name, color in [
+            ('blue', 'Attention', 'blue'),
+            ('orange', 'Alert', 'orange'),
+            ('red', 'Severe', 'red'),
+        ]:
+            level_df = timeline_df[timeline_df['Level'] == level]
+            if level_df.empty:
+                continue
+            fig.add_trace(
+                go.Bar(
+                    x=level_df['Date'],
+                    y=level_df['Cumulative_Probability'],
+                    name=name,
+                    marker_color=color,
+                    opacity=0.6,
+                    width=thin_width,
+                    showlegend=(name not in legend_seen)
+                ),
+                row=1,
+                col=1,
+                secondary_y=True,
+            )
+            legend_seen.add(name)
+
+        level_dates = _level_dates_from_timeline(timeline_df)
+        band_end = counts.index.max() + pd.Timedelta(days=7)
+        stage_ranges = [
+            ('blue', level_dates['blue'], level_dates['orange'] if pd.notnull(level_dates['orange']) else level_dates['red'] if pd.notnull(level_dates['red']) else band_end),
+            ('orange', level_dates['orange'], level_dates['red'] if pd.notnull(level_dates['red']) else band_end),
+            ('red', level_dates['red'], band_end),
+        ]
+        for color, start, end in stage_ranges:
+            if pd.isna(start) or pd.isna(end):
+                continue
+            if end <= start:
+                continue
+            x0 = start - half_week
+            x1 = end - half_week
+            if x1 <= x0:
+                continue
+            fig.add_shape(
+                type='rect',
+                x0=x0,
+                x1=x1,
+                y0=0,
+                y1=max_y * 1.36,
+                fillcolor=color,
+                opacity=0.45,
+                line_width=0,
+                layer='below',
+                row=2,
+                col=1,
+            )
+
+        for level, color in [('blue', 'blue'), ('orange', 'orange'), ('red', 'red')]:
+            date_val = level_dates[level]
+            if pd.notnull(date_val):
+                fig.add_vline(
+                    x=date_val,
+                    line_dash="dash",
+                    line_color=color,
+                    opacity=0.45,
+                    line_width=2,
+                    row=1,
+                    col=1,
+                )
+
+    y_max_limit = max_y * (1.6 if other_dates is not None else 1.32)
+    fig.update_layout(
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="center",
+            x=0.5
+        ),
+        plot_bgcolor='white',
+        margin=dict(l=40, r=40, t=95, b=55),
+        bargap=0.05
+    )
+    fig.update_xaxes(range=[x.min(), x.max()], type="date", showticklabels=False, row=1, col=1)
+    fig.update_xaxes(title_text="Date", range=[x.min(), x.max()], type="date", showticklabels=True, row=2, col=1)
+    fig.update_yaxes(title_text=f"<b>{epi}</b>", range=[0, y_max_limit], secondary_y=False, showgrid=False, row=1, col=1)
+    fig.update_yaxes(
+        title_text="<b>Probability (%)</b>",
+        range=[0, max(100, max_probability) * 1.05],
+        secondary_y=True,
+        gridcolor='lightgray',
+        fixedrange=True,
+        row=1,
+        col=1,
+    )
+    fig.update_yaxes(
+        title_text=f"<b>{epi}</b>",
+        range=[0, y_max_limit],
+        secondary_y=False,
+        showgrid=False,
+        fixedrange=True,
+        row=1,
+        col=1,
+    )
+    fig.update_yaxes(
+        range=[0, max_y * 1.36],
+        showticklabels=False,
+        title_text="",
+        showgrid=False,
+        fixedrange=True,
+        row=2,
+        col=1,
+        secondary_y=False,
+    )
+    fig.update_yaxes(
+        range=[0, 100],
+        showticklabels=False,
+        title_text="",
+        showgrid=False,
+        fixedrange=True,
+        row=2,
+        col=1,
+        secondary_y=True,
+    )
+    return fig
+
 # Render the retrospective bootstrap result across the full analysis period.
 def early_warning_visualization_bootstrap(data, data_all, epi, other_dates, Hockey_date, date_df, sample_window):
     if epi != 'ILI':
@@ -570,6 +819,22 @@ def early_warning_visualization_bootstrap(data, data_all, epi, other_dates, Hock
         split_labels=False,
         show_blue_band=True,
         show_season_boundaries=False,
+    )
+
+def early_warning_visualization_bootstrap_shared_axis_experiment(data, data_all, epi, other_dates, Hockey_date, date_df, sample_window):
+    if epi != 'ILI':
+        other_dates = None
+
+    analysis_data = data.reset_index(drop=True)
+
+    return _build_bootstrap_detection_timeline_shared_axis_experiment(
+        data=analysis_data,
+        epi=epi,
+        other_dates=other_dates,
+        hockey_dates=[],
+        date_df=date_df,
+        sample_window=sample_window,
+        show_blue_band=True,
     )
 
 # Render the full retrospective timeline.
@@ -613,6 +878,7 @@ def overall_period_visualization_bootstrap(data, epi, other_dates, Hockey_date, 
 
     fig.update_layout(
         xaxis=dict(
+            title="Date",
             range=[data['Date'].min(), data['Date'].max()],
             rangeslider=dict(visible=True, thickness=0.15, bgcolor="#EAEAEA"),
             type="date"
@@ -858,6 +1124,7 @@ def interactive_real_time_chart(data_all, detection_timeline, other_dates, epi, 
     r_date_str = level_dates['red'].strftime('%Y-%m-%d') if pd.notnull(level_dates['red']) else "Not detected"
     fig.update_layout(
         xaxis=dict(
+            title="Date",
             rangeslider=dict(visible=True, thickness=0.15, bgcolor="#EAEAEA"), 
             type="date",
             range=[min_date, max_date] 
@@ -932,6 +1199,7 @@ def interactive_real_time_chart_combined(season_results, epi):
 
     fig.update_layout(
         xaxis=dict(
+            title="Date",
             rangeslider=dict(visible=True, thickness=0.15, bgcolor="#EAEAEA"),
             type="date",
             range=[combined_data['Date'].min(), combined_data['Date'].max()]
