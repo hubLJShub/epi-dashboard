@@ -1,3 +1,4 @@
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -129,13 +130,13 @@ def summarize_detection_progression(detect_dates, monitoring_start=None, orange_
 
     timeline = pd.DataFrame(rows).sort_values('Date').reset_index(drop=True)
 
-    positive_rows = timeline[timeline['Cumulative_Ratio'] > 0]
-    blue_date = positive_rows.iloc[0]['Date'] if not positive_rows.empty else None
+    blue_rows = timeline[timeline['Level'] == 'blue']
+    blue_date = blue_rows.iloc[0]['Date'] if not blue_rows.empty else None
 
-    orange_rows = timeline[timeline['Cumulative_Ratio'] >= orange_threshold]
+    orange_rows = timeline[timeline['Level'] == 'orange']
     orange_date = orange_rows.iloc[0]['Date'] if not orange_rows.empty else None
 
-    red_rows = timeline[timeline['Cumulative_Ratio'] >= red_threshold]
+    red_rows = timeline[timeline['Level'] == 'red']
     red_date = red_rows.iloc[0]['Date'] if not red_rows.empty else None
 
     summary = {
