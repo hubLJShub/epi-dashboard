@@ -881,3 +881,4 @@ with tab2:
             <span style="font-size: 16px; color: #999;">(Insert your second plot code here later)</span>
         </div>
         """, unsafe_allow_html=True)
+ 
