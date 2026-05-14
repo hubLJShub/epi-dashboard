@@ -1002,14 +1002,11 @@ with tab1:
                     default=list(season_options.keys()),
                     key="season_summary_multiselect",
                 )
-                selected_specific_labels = [
-                    label for label in selected_season_labels
-                    if label != "All"
-                ]
-                if selected_specific_labels:
+                # 3. "All" 체크 로직이 필요 없으므로 선택된 라벨을 그대로 사용합니다.
+                if selected_season_labels:
                     selected_summary_items = [
                         season_options[label]
-                        for label in selected_specific_labels
+                        for label in selected_season_labels
                         if label in season_options
                     ]
                 else:
