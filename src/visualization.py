@@ -30,7 +30,7 @@ def _add_cumulative_detection_overlay(fig, timeline_df, secondary_y=True, legend
     level_dates = _level_dates_from_timeline(timeline_df)
 
     level_specs = [
-        ('blue', 'Attention', 'blue'),
+        ('blue', 'Caution', 'blue'),
         ('orange', 'Alert', 'orange'),
         ('red', 'Severe', 'red'),
     ]
@@ -678,7 +678,7 @@ def _build_bootstrap_detection_timeline_shared_axis_experiment(
         max_probability = max(max_probability, float(timeline_df['Cumulative_Probability'].max()))
 
         for level, name, color in [
-            ('blue', 'Attention', 'blue'),
+            ('blue', 'Caution', 'blue'),
             ('orange', 'Alert', 'orange'),
             ('red', 'Severe', 'red'),
         ]:
@@ -730,19 +730,6 @@ def _build_bootstrap_detection_timeline_shared_axis_experiment(
                 row=2,
                 col=1,
             )
-
-        for level, color in [('blue', 'blue'), ('orange', 'orange'), ('red', 'red')]:
-            date_val = level_dates[level]
-            if pd.notnull(date_val):
-                fig.add_vline(
-                    x=date_val,
-                    line_dash="dash",
-                    line_color=color,
-                    opacity=0.45,
-                    line_width=2,
-                    row=1,
-                    col=1,
-                )
 
     y_max_limit = max_y * (1.6 if other_dates is not None else 1.32)
     fig.update_layout(
